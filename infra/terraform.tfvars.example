@@ -1,0 +1,10 @@
+# Copy this to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit real values, especially secret_key_base.
+
+aws_region   = "us-east-1"
+project_name = "rails-ecs-demo"
+github_org   = "your-github-username"
+github_repo  = "rails-ecs-demo"
+
+# Do NOT put secret_key_base here. Pass it at apply time instead:
+#   terraform apply -var="secret_key_base=$(openssl rand -hex 64)"

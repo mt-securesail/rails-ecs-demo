@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+
+      - name: Run tests
+        run: bin/rails test
+
+  brakeman:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+
+      # Brakeman exits non-zero when it finds warnings. We don't want that to
+      # block the SARIF upload below, so `|| true` here — the actual gate is
+      # the GitHub code scanning alert, which you can require in branch
+      # protection later if you want.
+      - name: Run Brakeman
+        run: bundle exec brakeman -f sarif -o brakeman-results.sarif || true
+
+      - name: Upload Brakeman SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: brakeman-results.sarif
+          category: brakeman

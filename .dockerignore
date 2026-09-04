@@ -1,0 +1,10 @@
+.git
+.github
+infra
+docs
+log/*
+tmp/*
+!log/.keep
+!tmp/.keep
+*.md
+.env*

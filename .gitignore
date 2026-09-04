@@ -1,0 +1,19 @@
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+/.bundle
+/vendor/bundle
+*.rbc
+.byebug_history
+/.env
+/.env.*
+.DS_Store
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.backup
+infra/*.tfvars
+infra/.terraform.lock.hcl
+!infra/terraform.tfvars.example
