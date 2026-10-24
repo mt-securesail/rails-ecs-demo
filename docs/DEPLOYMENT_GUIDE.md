@@ -8,6 +8,22 @@ and Brakeman findings.
 
 Do the steps in order — later steps assume earlier ones are done.
 
+## Roadmap
+
+**Part A — Build the pipeline and meet the scanners (sections 1-9)**
+Prerequisites, repo, Terraform/AWS, GitHub Actions OIDC, first deploy, secret scanning /
+push protection / CodeQL / Brakeman, and one fake-secret experiment.
+
+**Part B — Close the loop (sections 10-15)**
+10. Limit exposure before adding vulnerabilities (lock the ALB to your IP, gate deploys on CI)
+11. Widen detection: dependencies, container, Terraform, and a running-app (DAST) scan
+12. The feedback loop: every finding becomes a regression test or rule that gates future deploys
+13. Inject vulnerabilities on purpose and record which tool catches which class
+14. Add an open-weight model as an extra reviewer (static code + running app)
+15. Measure results and iterate
+
+Section 16 is teardown.
+
 ---
 
 ## 0. What you'll end up with
@@ -250,7 +266,110 @@ execution risk) as a code scanning alert on the PR. Revert it afterward; don't m
 
 ---
 
-## 10. Cost control / tearing it down
+---
+
+# Part B — Close the loop
+
+## 10. Limit exposure before adding vulnerabilities
+
+You're about to put deliberately flawed code near an internet-facing AWS endpoint. Two controls first:
+
+1. **Lock the ALB to your own IP.** Add a variable (e.g. `allowed_cidr`, set to your public IP as
+   `x.x.x.x/32`) and use it instead of `0.0.0.0/0` in the ALB security group in
+   `infra/networking.tf`. Re-run `terraform apply`. Your home IP changes occasionally; update it when it does.
+2. **Make CI a gate.** In the repo: **Settings → Rules → Rulesets** (or Branch protection) → protect
+   `main`: require a pull request, require the `test` and `brakeman` checks (and later the other
+   scanners) to pass, and block force-pushes. Vulnerable code should only ever reach `main` if you
+   are deliberately testing that a gate *fails to stop it*, and in that case tear the ALB rule
+   open to nobody but you.
+
+Vulnerable variants live on branches/PRs and are never merged unless that is the specific experiment.
+
+## 11. Widen detection
+
+Add these one at a time, each in its own PR, so you can see exactly what each adds:
+
+| Layer | Tool | Where it runs |
+|---|---|---|
+| Dependencies | Dependabot alerts + the Dependency Review action on PRs | GitHub |
+| Code (SAST) | CodeQL (already on) + Brakeman (already on) | GitHub Actions |
+| Container image | Trivy in CI, plus Amazon Inspector enhanced scanning on ECR | Actions / AWS |
+| Terraform (IaC) | Checkov or Trivy config scan | Actions |
+| Workflow files | CodeQL for GitHub Actions workflows, plus pinning actions to SHAs | GitHub |
+| Running app (DAST) | OWASP ZAP baseline scan against the ALB URL, run after deploy | Actions |
+| AWS runtime/posture | GuardDuty, Security Hub, IAM Access Analyzer (optional, small cost) | AWS |
+
+Upload SARIF from each tool to code scanning where it supports it, so all findings land in
+**Security → Code scanning** with a distinct `category`.
+
+## 12. The feedback loop
+
+GitHub doesn't turn a finding into a test automatically; you do that step, and the pipeline then
+enforces it. For every finding (from any scanner or from the model in section 14):
+
+1. **Root-cause it**: which class of mistake is this (unsanitized input into `eval`, missing auth
+   check, unpinned dependency, over-broad IAM, ...)?
+2. **Fix it** on a branch.
+3. **Encode it as a regression check**, in order of preference:
+   - a unit/integration test that asserts the safe behavior (e.g. request with a malicious param is rejected)
+   - a custom rule (Semgrep rule or CodeQL query) that matches the pattern anywhere in the codebase
+   - a Brakeman/Checkov/Trivy config tightening (fail on that check, remove it from ignore lists)
+4. **Make it required**: add the check to the ruleset from section 10.
+5. **Log it** in `docs/findings-log.md`: finding, root cause, fix, test/rule added, PR link.
+
+Next iteration of the code cannot deploy unless that check passes. The CD workflow should also
+`needs:` the CI jobs, or deploy only on `main` after the ruleset has enforced them.
+
+Copilot Autofix can suggest fixes for code scanning alerts; check current availability for public repos.
+
+## 13. Inject vulnerabilities on purpose
+
+Keep a catalog in `docs/vuln-catalog.md` with one row per vulnerability, each on its own branch
+(`vuln/<name>`) and PR that you never merge. Suggested starting set:
+
+| Vulnerability | Where | Expected detector |
+|---|---|---|
+| `eval` / command injection on a param | Rails controller | Brakeman, CodeQL |
+| XSS via `html_safe` / `raw` on user input | view | Brakeman, CodeQL |
+| Unsafe redirect (`redirect_to params[:url]`) | controller | Brakeman |
+| Hardcoded API key | any file | Secret scanning, push protection |
+| Outdated gem with known CVE | Gemfile.lock | Dependabot, Dependency Review, Trivy |
+| Container runs as root / `latest` base tag | Dockerfile | Trivy, Inspector |
+| Security group open to `0.0.0.0/0` on the task port, IAM `*:*` | Terraform | Checkov |
+| Script injection (`${{ github.event.pull_request.title }}` in a `run:` step) | workflow | CodeQL for Actions |
+| Missing security headers / info disclosure | running app | ZAP baseline |
+
+Add a "Detected by" and "Missed by" column, filled in after each run. The misses are the most
+valuable output of the whole project: they show which class of flaw each tool cannot see.
+
+## 14. Open-weight model as an extra reviewer
+
+Goal: a model you run yourself reviews (a) the source and (b) the running app, and its findings
+feed the same loop as section 12.
+
+- **Run it locally** (e.g. Ollama or llama.cpp on your Mac) so the code never goes to a third party.
+  A MacBook Air limits you to smaller code-capable models (roughly 7B-14B parameters); check which
+  current open-weight coder models fit your RAM.
+- **Static review**: a script (`scripts/llm_review.py`) walks `app/`, `config/`, `Dockerfile`, `infra/`,
+  `.github/workflows/`, sends each file with a fixed review prompt, and writes structured output
+  (file, line, class of issue, rationale) as JSON, optionally converted to SARIF to upload to code scanning.
+- **Running-app review**: give the model the ZAP report and raw HTTP responses (headers, error pages)
+  from the deployed app, and ask it to identify weaknesses and suggest requests to probe them.
+  Only probe your own ALB, locked to your IP.
+- **Treat output as advisory**: expect false positives and misses. Never auto-merge or auto-gate on model
+  output; a human triages, and confirmed findings go through the section 12 loop to become deterministic tests.
+- **Prompt-injection caution**: code under review can contain text aimed at the model ("ignore previous
+  instructions"). Run the reviewer with no tools, no network, and no write access.
+- **Score it** against the section 13 catalog: what it caught that scanners missed, what it missed,
+  and its false-positive rate.
+
+## 15. Measure and iterate
+
+Once the catalog has been run end to end, summarize: detection rate per tool, per vulnerability
+class; time from commit to detection; which findings became permanent tests. Pick the biggest
+gaps, add or tune a control, then re-run the catalog to confirm the gap closed.
+
+## 16. Cost control / tearing it down
 
 Running: an ALB (~$16-20/month) + a small Fargate task (roughly a few dollars/month at this size)
 + negligible ECR/CloudWatch storage. Nothing here is free-tier-eligible long-term. When you're
