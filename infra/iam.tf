@@ -52,6 +52,13 @@ resource "aws_iam_role" "task" {
 # --- GitHub Actions OIDC federation: lets Actions assume an AWS role without ---
 # --- ever storing an AWS access key / secret key in GitHub. ---
 
+# Newer GitHub repos put immutable numeric IDs in the OIDC "sub" claim
+# (repo:owner@<id>/repo@<id>). Use the value GitHub reports for this repo
+# when set; otherwise fall back to the name-based format.
+locals {
+  github_sub_prefix = coalesce(var.github_oidc_sub_prefix, "repo:${var.github_org}/${var.github_repo}")
+}
+
 data "tls_certificate" "github" {
   url = "https://token.actions.githubusercontent.com/.well-known/openid-configuration"
 }
@@ -77,7 +84,7 @@ data "aws_iam_policy_document" "github_assume" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_org}/${var.github_repo}:*"]
+      values   = ["${local.github_sub_prefix}:*"]
     }
   }
 }

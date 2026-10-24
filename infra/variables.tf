@@ -20,6 +20,12 @@ variable "github_repo" {
   type        = string
 }
 
+variable "github_oidc_sub_prefix" {
+  description = "Optional. The OIDC subject prefix GitHub puts in tokens for this repo, e.g. repo:owner@123/repo@456. Get it with: gh api repos/OWNER/REPO/actions/oidc/customization/sub. If null, falls back to repo:<github_org>/<github_repo>."
+  type        = string
+  default     = null
+}
+
 variable "container_port" {
   description = "Port the Rails app listens on inside the container"
   type        = number
