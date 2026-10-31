@@ -22,7 +22,23 @@ push protection / CodeQL / Brakeman, and one fake-secret experiment.
 14. Add an open-weight model as an extra reviewer (static code + running app)
 15. Measure results and iterate
 
-Section 16 is teardown.
+**Part C — User accounts and login (sections 16-21)**
+16. Foundations: database, HTTPS and a domain, email, secrets
+17. Email + password signup (name, email, password)
+18. Passkey login
+19. Okta single sign-on
+20. Security testing for authentication
+21. Opening signups to the public (or deciding not to)
+
+**Part D — The weather-prep email product and billing (sections 22-27)**
+22. Product definition and data model
+23. Weather data and report logic
+24. Scheduled email delivery
+25. Subscription billing with Stripe (test mode first)
+26. Security testing for email and billing
+27. Going live (optional)
+
+Section 28 is teardown.
 
 ---
 
@@ -369,7 +385,210 @@ Once the catalog has been run end to end, summarize: detection rate per tool, pe
 class; time from commit to detection; which findings became permanent tests. Pick the biggest
 gaps, add or tune a control, then re-run the catalog to confirm the gap closed.
 
-## 16. Cost control / tearing it down
+---
+
+# Part C — User accounts and login
+
+Do this after Part B is working, because it adds a lot of attack surface (and a lot of
+material for the vulnerability catalog). Every item here should go through the same loop:
+build on a branch, PR, CI gates, deploy, then test it with the scanners and the model.
+
+## 16. Foundations
+
+Authentication needs things the app doesn't have yet:
+
+- **A database.** Today the app has none. Add Active Record and a managed Postgres database
+  (Amazon RDS) in private subnets, reachable only from the app's security group. Terraform
+  creates it; credentials live in AWS Secrets Manager, injected into the task like
+  `SECRET_KEY_BASE` is now. Add a migration step to the deploy workflow (a one-off ECS task
+  that runs `db:migrate` before the service update). RDS adds a monthly cost.
+- **HTTPS and a domain.** Passkeys (WebAuthn) require HTTPS and are bound to your domain name,
+  and Okta requires HTTPS callback URLs. Register or use a domain, add a Route 53 hosted zone,
+  an ACM certificate, an HTTPS listener on the ALB, and redirect HTTP to HTTPS. Set
+  `force_ssl` in production and use secure cookies.
+- **Email.** Signup verification and password reset need outbound email (Amazon SES, with your
+  domain verified; new SES accounts start in a sandbox that only sends to verified addresses).
+- **A private network layout.** Move the app tasks to private subnets behind a NAT gateway or VPC endpoints,
+  rather than the default VPC with public IPs. This also adds cost.
+
+## 17. Email + password signup
+
+Collect only name, email, and password. Rails 8's built-in authentication generator is the
+simplest starting point; Devise is the common alternative.
+
+- Store passwords only as strong salted hashes (`has_secure_password` with bcrypt). Never log them
+  (the parameter filter in `config/initializers/filter_parameter_logging.rb` already helps).
+- Password policy: favor length over complexity rules, and reject known-breached passwords.
+- Verify email ownership before the account is usable.
+- Use identical responses for "unknown email" and "wrong password" and for "email already registered",
+  to avoid user enumeration. Rate-limit signup, login, and reset (Rack::Attack, plus AWS WAF later).
+- Password reset: single-use, short-lived tokens, invalidated after use or password change.
+- Sessions: secure and HTTP-only cookies, session expiry, regenerate the session on login, CSRF protection on.
+- Bot control on the signup form (rate limits first; CAPTCHA only if needed).
+
+## 18. Passkey login
+
+- Add WebAuthn support with the `webauthn-ruby` gem. Set the relying party ID to your domain.
+- Store each credential's public key, credential ID, and signature counter per user. Never store private keys
+  (they never leave the user's device).
+- Build the two flows: registration (after signing in some other way) and authentication, both with a
+  server-generated, single-use challenge.
+- Plan account recovery up front (a second passkey, recovery codes, or a verified email flow). Recovery is
+  usually the weakest link, so test it hard.
+
+## 19. Okta single sign-on
+
+- Create an Okta developer tenant (a free developer tenant is available) and an OIDC web app
+  integration with your HTTPS callback URL.
+- Integrate with `omniauth_openid_connect` (or SAML if you prefer). Use the authorization code flow
+  with PKCE, validate `state` and `nonce`, and verify the token's issuer, audience, and signature.
+- Store the Okta client secret in Secrets Manager, never in the repo. This is also a realistic place to
+  rehearse a leak and see secret scanning respond.
+- Decide the account-linking rule explicitly: never auto-link an Okta login to an existing local
+  account based on an unverified email address (a classic account takeover bug).
+- Use only the allowed callback URLs in Okta, and test with Okta test users.
+
+## 20. Security testing for authentication
+
+Add these to the vulnerability catalog (section 13) and run them through the detection matrix:
+
+| Vulnerability | Expected detector |
+|---|---|
+| Missing authorization check (user A reads user B's data) | Tests/DAST, maybe the model |
+| User enumeration via different login or signup responses | DAST, tests |
+| No rate limiting or lockout on login | Tests/DAST |
+| Weak or reusable reset tokens | Tests, code review, the model |
+| Session fixation, cookies missing `Secure`/`HttpOnly` | Brakeman, ZAP |
+| Open redirect after login (`redirect_to params[:next]`) | Brakeman, CodeQL |
+| OIDC without `state`/`nonce`/audience checks | The model, code review |
+| Auto-linking on unverified email | The model, tests |
+| Hardcoded Okta client secret | Secret scanning (try an Okta-style token) |
+
+Run ZAP with an authenticated session (a test user) so it can see pages behind login. Turn every
+confirmed finding into a regression test (section 12): for example, tests asserting identical
+responses for known and unknown emails, that a second user can't fetch the first user's record, and that
+the 11th rapid login attempt is rejected.
+
+## 21. Opening signups to the public (or deciding not to)
+
+Public signups mean you hold real people's emails and password hashes. Do this only when you're comfortable:
+
+- Before opening up: HTTPS only, AWS WAF with rate-based rules on the ALB, logging and alarms
+  (CloudWatch, GuardDuty), encrypted RDS with automated backups, and the whole catalog re-run.
+- Consider a privacy notice, a data-retention rule, and an account-deletion path.
+- Remember that section 10 locked the ALB to your IP. Opening signups reverses that. Keep a separate,
+  locked-down environment for vulnerable-code experiments, or stop injecting vulnerabilities into anything
+  that stores real user data.
+- A lower-risk alternative: keep the app restricted to your IP and use only test accounts and Okta test users.
+  You'll learn nearly the same thing without holding anyone else's data.
+
+---
+
+# Part D — The weather-prep email product and billing
+
+This is the "real app" the earlier parts protect. It depends on Part C (accounts, database, HTTPS, SES
+email). Build and test everything with Stripe in test mode and your own email address; no real money or
+real customers are needed to learn the whole flow.
+
+## 22. Product definition and data model
+
+- **The product:** a subscriber gets one email each morning: bring an umbrella if rain is likely, wear
+  sunscreen if UV is high, or neither. Keep it to those two rules at first.
+- **What to store per user:** email (from Part C), location (a ZIP/postal code or city, converted to
+  coordinates), time zone, preferred send time, subscription status, and the Stripe customer ID. Location is
+  personal data: collect the minimum (a ZIP code is enough) and treat it as sensitive.
+- **Entitlement rule:** an email is sent only if the user's subscription is `active` (or in a grace period you
+  choose). The app's own database, updated by Stripe webhooks, is the source of truth for that.
+
+## 23. Weather data and report logic
+
+- Pick a forecast API. The US National Weather Service API (`api.weather.gov`) needs no key and covers the US.
+  Open-Meteo is another no-key option with a UV index field. Check each one's terms before using it in
+  anything commercial, and set a descriptive User-Agent if required. Paid APIs (such as OpenWeather) need an
+  API key, which belongs in Secrets Manager, never in the repo.
+- Rules to start with: umbrella if the precipitation probability for the morning commute window is at or above a
+  threshold (for example 40%); sunscreen if the forecast UV index is at or above 6. Make both thresholds
+  configuration, and write unit tests for each rule and for the boundaries.
+- Treat the weather API as untrusted input: validate what comes back, set timeouts, handle outages (send nothing
+  or a clear "forecast unavailable" message rather than failing silently), and cache results per location.
+
+## 24. Scheduled email delivery
+
+- Use **Amazon EventBridge Scheduler** to trigger a job (an ECS scheduled task or a Lambda function) on a
+  schedule, for example every 15 minutes. Each run finds subscribers whose local send time has arrived and who
+  haven't been emailed today, builds each report, and sends it with Amazon SES.
+- Make sends idempotent: record "sent on date X for user Y" before or atomically with sending, so a retry never
+  emails someone twice.
+- Email compliance: include an unsubscribe link (and a `List-Unsubscribe` header), a physical or contact address
+  as required by anti-spam law in your region, and handle SES bounces and complaints (SNS notifications) by
+  suppressing those addresses.
+- Use the least-privilege IAM role for the job: send via SES from your verified domain, read only its own secrets,
+  and nothing else. This is another good target for the IAM scanners from section 11.
+
+## 25. Subscription billing with Stripe (test mode first)
+
+**Setting up Stripe.** Create an account at stripe.com. You can build and test the whole flow in **test mode**
+(Stripe also offers isolated sandboxes) without activating the account, entering business details, or linking a
+bank account. In test mode, no real card is charged. Do the following in the Stripe dashboard:
+
+1. Create a **Product** ("Daily Weather Prep") with a recurring **Price** (for example monthly).
+2. Note your two API keys: a **publishable key** (safe to expose in browser code) and a **secret key** (server-side only).
+3. Configure the **Customer Portal** so subscribers can update their card, cancel, and see invoices.
+4. Add a **webhook endpoint** pointing at your app's HTTPS URL; Stripe gives you a **webhook signing secret**.
+
+**Design.**
+
+- Use **Stripe Checkout** (Stripe's hosted payment page) to start a subscription, and the **Customer Portal** for
+  self-service. Your servers never see card numbers, which keeps your PCI scope minimal. Never build your own card form
+  that posts card numbers to your server.
+- The server creates the Checkout Session using the **price ID that your server chooses**, never an amount or price
+  sent from the browser.
+- Handle webhooks, at least: `checkout.session.completed`, `customer.subscription.updated`,
+  `customer.subscription.deleted`, and `invoice.payment_failed`. **Verify the signature** on every webhook using the
+  signing secret, ignore events you don't expect, and process each event ID only once (store processed IDs).
+- Update the user's subscription status in your database only from verified webhooks, not from the browser's
+  "success" redirect.
+- Local testing: use the Stripe CLI to forward webhooks to your laptop. Test with Stripe's published test card numbers
+  (the standard success card is 4242 4242 4242 4242 with any future expiry and any CVC) and their failure-case cards.
+- Keys: put the secret key and the webhook signing secret in AWS Secrets Manager and inject them into the task like other
+  secrets. Keep test and live keys strictly separate.
+- Secret scanning: Stripe is a supported secret-scanning provider, so a Stripe secret key pushed to a public repo is exactly
+  what push protection is built to catch. For the experiment, use a randomly generated fake key shaped like one
+  (the same technique as section 7), never a real key, test or live. If a real Stripe key ever leaks, roll it in the
+  dashboard immediately.
+
+**Alternatives.** A merchant-of-record service (Paddle, Lemon Squeezy) handles sales tax and compliance for you,
+at a different fee structure. Stripe is the most common choice for learning the mechanics.
+
+## 26. Security testing for email and billing
+
+Add these to the vulnerability catalog (section 13) and run them through the detection matrix and the section 12 loop:
+
+| Vulnerability | Expected detector |
+|---|---|
+| Webhook endpoint that skips signature verification | Tests, the model, code review |
+| Replaying an old webhook event (no idempotency) | Tests |
+| Price or amount taken from the request instead of the server | Tests, DAST, the model |
+| Granting access from the browser's "success" redirect instead of a webhook | Tests, the model |
+| One user reading or changing another user's billing portal session or subscription (IDOR) | Tests, DAST |
+| Stripe secret key or weather API key committed to the repo | Secret scanning, push protection |
+| Email header injection through user-supplied fields | Brakeman, the model |
+| Subscribe/unsubscribe links without tokens (anyone can unsubscribe anyone) | Tests, the model |
+| User-supplied location used unsafely in an outbound API request (SSRF-style) | CodeQL, the model |
+| Over-broad IAM on the scheduled job | Checkov/Trivy |
+
+Regression tests to add as you fix each one: webhook with a bad signature is rejected, the same event twice causes one
+state change, an email is never sent to a canceled or unpaid subscriber, and a tampered price is ignored.
+
+## 27. Going live (optional)
+
+Staying in test mode is a perfectly good end state. If you want to charge a real card later (even just your own):
+activate the Stripe account (business or individual details, bank account for payouts, tax information), switch to live
+keys held separately in Secrets Manager, review sales-tax obligations, publish a privacy policy and terms of service, and
+repeat the security catalog against the live-facing environment. Run a small live charge yourself first, and monitor
+failed payments and webhook delivery in the Stripe dashboard.
+
+## 28. Cost control / tearing it down
 
 Running: an ALB (~$16-20/month) + a small Fargate task (roughly a few dollars/month at this size)
 + negligible ECR/CloudWatch storage. Nothing here is free-tier-eligible long-term. When you're
