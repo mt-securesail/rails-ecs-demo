@@ -11,8 +11,16 @@ Do the steps in order — later steps assume earlier ones are done.
 ## Roadmap
 
 **Part A — Build the pipeline and meet the scanners (sections 1-9)**
-Prerequisites, repo, Terraform/AWS, GitHub Actions OIDC, first deploy, secret scanning /
-push protection / CodeQL / Brakeman, and one fake-secret experiment.
+1. Prerequisites: accounts and local tools (Homebrew, git, gh, AWS CLI, Terraform, Ruby)
+2. Create the GitHub repo and push the code
+3. Provision the AWS infrastructure with Terraform
+4. Wire GitHub Actions to AWS (OIDC and repository variables)
+5. First deploy: watch the pipeline and open the live app
+6. Turn on GitHub's security features (secret scanning, push protection, Dependabot, CodeQL)
+7. Commit a fake secret on purpose and watch push protection and secret scanning react
+8. Review Brakeman and CodeQL findings
+8a. Fix Dependabot alerts and clear the PRs
+9. The normal dev loop, going forward
 
 **Part B — Close the loop (sections 10-15)**
 10. Limit exposure before adding vulnerabilities (lock the ALB to your IP, gate deploys on CI)
@@ -271,6 +279,36 @@ Push that on a branch and open a PR — Brakeman should flag the `eval` call (re
 execution risk) as a code scanning alert on the PR. Revert it afterward; don't merge it.
 
 ---
+
+## 8a. Fix Dependabot alerts and clear the PRs
+
+Once Dependabot is enabled (section 6), it raises alerts for vulnerable dependencies and opens a pull request for each
+fixable one. This is the first real "finding, fix, verify" cycle in the project. Do it on the **GitHub website** and in the
+**VS Code terminal**.
+
+1. **Read the alerts.** On the GitHub website, open **Security → Dependabot**. For each alert, note the package, severity,
+   vulnerable and patched versions. Our run: puma (2 High) and crass (1 Moderate).
+2. **List the PRs.** `gh pr list --author "app/dependabot"`. Without a `.github/dependabot.yml` file, these PRs are
+   security updates only. Several alerts can share one PR (both puma alerts were fixed by one PR).
+3. **Handle the riskiest first.** Public-facing and runtime components (the web server) before transitive or minor ones.
+4. **Check CI on each PR.** `gh pr checks <number>` should show `test` and `brakeman` passing. CodeQL may show as skipped for
+   dependency-only changes.
+5. **Mind major-version jumps.** Our puma PR went from 6.x to 7.x, so look at **Files changed** (the `Gemfile` constraint
+   and `Gemfile.lock`) and watch the deployed app, not just CI. Tests run in the test environment and don't prove the
+   production server starts.
+6. **Merge one PR at a time.** `gh pr merge <number> --squash`. Each merge to `main` deploys to Fargate. Wait for
+   **Deploy to ECS** to finish (`gh run watch`), then load the app's URL and `/up`, and check **AWS Management Console →
+   ECS → rails-ecs-demo-service** for one running task. If a second PR conflicts on `Gemfile.lock`, comment
+   `@dependabot rebase` on it on the GitHub website.
+7. **Confirm the alerts closed.** Back on **Security → Dependabot**, the alerts move to "Fixed" within a few minutes.
+8. **Log it** in `docs/findings-log.md`: alert, severity, fix (PR link), and how you verified it.
+
+**Lesson learned: overlapping deploys.** Merging PRs and pushing docs in quick succession started several deploys at once.
+ECS replaces an in-progress deployment when a newer one arrives, so one run reported failure ("deployment not found after
+stabilization") even though the newest deployment succeeded and the app was healthy. The service events (`aws ecs
+describe-services ... --query "services[0].events[:12]"`) showed a superseded deployment, not failed health checks.
+The fix is in `.github/workflows/cd.yml`: a `concurrency` group (`deploy-production`, `cancel-in-progress: false`) so deploys
+queue and run one at a time.
 
 ## 9. The normal dev loop, going forward
 
