@@ -8,7 +8,6 @@ practice secure-SDLC tooling (secret scanning, CodeQL, Brakeman, Dependabot, and
 
 - Always say exactly where an instruction applies: the **AWS Management Console** (browser), the **GitHub website**,
   the **Stripe dashboard**, the **VS Code terminal**, or the **Claude Code panel**. Never just say "the console".
-- I'm newer to GitHub and AWS. Explain what a command does before I run it, and give the folder to run it from.
 - Be concise.
 
 ## Safety rules
