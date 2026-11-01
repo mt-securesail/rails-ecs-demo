@@ -10,6 +10,13 @@ permissions:
   id-token: write
   contents: read
 
+# Only one deploy runs at a time. A newer push waits for the running deploy
+# to finish (and replaces any older waiting one) instead of starting a second
+# ECS deployment that supersedes the first.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
