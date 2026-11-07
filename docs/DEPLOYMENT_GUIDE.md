@@ -28,6 +28,8 @@ Do the steps in order — later steps assume earlier ones are done.
 12. The feedback loop: every finding becomes a regression test or rule that gates future deploys
 13. Inject vulnerabilities on purpose and record which tool catches which class
 14. Add an open-weight model as an extra reviewer (static code + running app)
+14a. Try AWS Continuum code review (AWS Security Agent) on pull requests
+14b. Try AWS Security Agent penetration testing against the running app
 15. Measure results and iterate
 
 **Part C — User accounts and login (sections 16-21)**
@@ -46,7 +48,18 @@ Do the steps in order — later steps assume earlier ones are done.
 26. Security testing for email and billing
 27. Going live (optional)
 
-Section 28 is teardown.
+**Core path:** Parts A through D, up to section 25 (the website, the daily email, and Stripe billing in test mode),
+are the main goal. Sections 26-27 round out Part D, and Part E is a stretch goal for after the core path works.
+
+**Part E — The mobile app and the app stores (sections 28-33), a later stretch goal**
+28. Scope and architecture: one backend, web and mobile clients
+29. Location: geolocation or ZIP code
+30. Notifications and delivery
+31. Mobile subscriptions (Apple and Google billing) alongside Stripe on the web
+32. Developer accounts, signing, and getting into the App Store and Google Play
+33. Mobile security testing
+
+Section 34 is teardown.
 
 ---
 
@@ -417,6 +430,43 @@ feed the same loop as section 12.
 - **Score it** against the section 13 catalog: what it caught that scanners missed, what it missed,
   and its false-positive rate.
 
+## 14a. AWS Continuum code review (AWS Security Agent)
+
+AWS Continuum is AWS's agentic security platform. AWS Security Agent, which launched with code review and
+penetration testing, is now documented as part of it. Code review runs AI-assisted static analysis over your repo and can
+review pull requests automatically, posting findings as PR comments. It can optionally propose fixes as PRs. Reviews reportedly
+take 30-60 minutes depending on repo size. This is a second AI reviewer to compare with CodeQL, Brakeman, Copilot Autofix, and
+the open-weight model from section 14.
+
+- **Where you work:** the AWS Management Console for setup, and the GitHub website to review its PR comments.
+- **Connect GitHub with least privilege.** Connecting installs an AWS-side GitHub integration. Grant access to this one repo only,
+  never the whole account, and review the permissions it asks for. Remove the integration when you're done.
+- **Run it on the planted flaws.** Re-open your catalog's vulnerable branches (section 13) as PRs and see whether it flags them. Record
+  its rule names, severity, false positives, and what it missed in `docs/vuln-catalog.md`.
+- **Treat its auto-fix PRs like any PR:** CI and the regression-test requirement (section 12) apply. Don't turn on any autonomous mode.
+- **Pricing and availability:** I found conflicting reports on what code review costs and whether it's still in preview. Check the
+  AWS pricing page and the service documentation before you start, and set an AWS Budgets alert (AWS Management Console, Billing and Cost Management, Budgets).
+
+## 14b. AWS Security Agent penetration testing
+
+The Security Agent's penetration test is an AI agent that probes a running web application and reports validated findings.
+Reported pricing is pay-as-you-go at about $50 per task-hour, and AWS's own example for an average application is on the order of
+24 task-hours, which is roughly $1,200. One directory listing mentions a free trial, but I couldn't confirm it on AWS's pages. Verify
+current pricing before you run it, and set a budget alert first.
+
+- **Where you work:** the AWS Management Console.
+- **Only test what you own.** It will need proof you control the target (typically domain verification), and AWS's penetration-testing
+  policy applies. Never point it at anything else.
+- **Pick the target carefully.** Use a stable environment with the catalog's planted vulnerabilities (section 13), not production or anything
+  with real user data. Needing a reachable URL conflicts with the IP lock from section 10. You may need to open access for the agent's source
+  addresses for the test window, then close it again. Check the documentation for what the agent needs.
+- **Test accounts for authenticated testing.** After Part C exists, give it a test user, never a real one.
+- **Scope the first run small** (one target, limited paths) to learn what a run costs before you try a bigger one.
+- **Score it** against the catalog: which planted flaws it found, what it found that nothing else did, false positives, cost per validated finding,
+  and how long it took. Turn every confirmed finding into a regression test (section 12).
+- Compare it with the open-weight model and OWASP ZAP from sections 11 and 14. Each takes a different approach, and the point is to learn
+  what each one misses.
+
 ## 15. Measure and iterate
 
 Once the catalog has been run end to end, summarize: detection rate per tool, per vulnerability
@@ -626,7 +676,104 @@ keys held separately in Secrets Manager, review sales-tax obligations, publish a
 repeat the security catalog against the live-facing environment. Run a small live charge yourself first, and monitor
 failed payments and webhook delivery in the Stripe dashboard.
 
-## 28. Cost control / tearing it down
+---
+
+# Part E — The mobile app and the app stores
+
+**Stretch goal.** Do this only after the web app, daily email, and Stripe billing (through section 25) work end to end.
+A smaller version: a thin mobile client with a ZIP-code screen, subscriptions through a managed service such as RevenueCat,
+and one TestFlight build, before attempting a full store release.
+
+Goal: show that you can build the infrastructure, ship a website and a mobile app, get the app into the stores, and
+collect subscriptions. Keep the app deliberately small: sign in, set a location, subscribe, get the morning report.
+This part depends on Parts C and D (accounts, HTTPS and domain, the report job, billing).
+
+## 28. Scope and architecture
+
+- **One backend, two clients.** The Rails app on AWS stays the single source of truth for users, locations, and subscription
+  status. The website and the mobile app are both clients of it. Add a JSON API (under `/api/v1`) with token-based
+  authentication for the mobile app, since mobile clients don't use browser cookie sessions.
+- **Pick a mobile approach:**
+  - *React Native with Expo* or *Flutter*: one codebase for iOS and Android, a common choice for small apps.
+  - *Native Swift (iOS) and Kotlin (Android)*: most control, most work.
+  - *A thin wrapper around the website* (for example Capacitor): quickest, but Apple may reject apps that are little more
+    than a website, so the app should use at least one native feature such as location or notifications.
+- **You need a Mac and Xcode for iOS builds.** You already have a Mac. CI for iOS builds uses macOS runners (GitHub Actions
+  or a hosted build service such as Expo EAS).
+- Put the mobile app in its own repo (or a clearly separated folder), with its own CI, and apply the same scanners to it.
+
+## 29. Location: geolocation or ZIP code
+
+- Offer both: ask for the device's location (foreground, "while using the app" permission only, coarse accuracy is
+  enough for a forecast) and a manual ZIP/postal code entry as the fallback for people who decline.
+- Convert whatever you get to coordinates or a forecast grid point on the server, store only what you need (a ZIP code or
+  rounded coordinates), and never keep a location history.
+- Mobile apps must explain why they want location (a usage-description string in the app's configuration), and both stores
+  require a privacy policy and a disclosure of what you collect (see section 32).
+
+## 30. Notifications and delivery
+
+- The product is the morning email (section 24). Keep that as the primary delivery channel.
+- Optional: add push notifications through Apple Push Notification service and Firebase Cloud Messaging (or Expo's push
+  service) as a second channel. That adds device tokens to store, opt-in handling, and another thing to secure.
+  Skip it if you want the minimum scope.
+
+## 31. Mobile subscriptions alongside Stripe on the web
+
+Billing is where mobile differs most from the web:
+
+- **On the web**, keep Stripe Checkout (section 25).
+- **Inside an iOS app**, Apple's rules generally require digital subscriptions to be sold through Apple's in-app purchase
+  (StoreKit). Apple's rules about linking out to an outside web checkout have been changing; recent secondary sources say links
+  to your own website are now permitted in the US storefront, while other regions need Apple's External Purchase Link
+  entitlement. Treat that as unverified and read Apple's current App Review Guidelines (section 3.1) before deciding.
+- **On Android**, Google Play generally requires Google Play Billing for digital subscriptions sold in the app.
+- **Design for three payment sources feeding one entitlement.** In the backend, keep a single "subscription status" per
+  user, updated from Stripe webhooks, Apple's App Store Server Notifications, and Google Play's real-time developer
+  notifications. A managed service such as RevenueCat can merge these for you.
+- **Never trust the app to say it's subscribed.** The backend verifies purchases with Apple and Google, and the app only
+  displays what the backend reports.
+- **Testing:** use Apple's sandbox and TestFlight with StoreKit test configuration, and Google Play license testers.
+  Neither store charges real money for test purchases.
+- Stores take a commission on in-app subscriptions. Check current rates and any small-business program before you set a price.
+
+## 32. Developer accounts, signing, and getting into the stores
+
+- **Apple:** enroll in the Apple Developer Program (reported at about $99 per year). You get App Store Connect, certificates
+  and provisioning profiles, TestFlight for beta testing, and App Review.
+- **Google:** register a Google Play Console account (reported as a one-time $25). Sources say new personal accounts must run
+  a closed test with about 12 testers for 14 days before applying for production access. An organization account can avoid that
+  but needs a D-U-N-S number. Verify the current rules.
+- **Both stores need:** an app name and icon, screenshots, a description, a privacy policy URL, and a data-disclosure form
+  (Apple's App Privacy details, Google's Data safety form). Review can take days, and rejections for missing privacy details,
+  broken login, or billing-rule violations are common. Provide a demo account for reviewers.
+- **Signing keys and store credentials are secrets.** Keep them out of the repo. Store them in GitHub Actions secrets or the
+  build service's secret store, and never commit a keystore, `.p8` key, or provisioning certificate. They're also a realistic
+  target for the secret-scanning experiments from section 7 (use random fake values only).
+- **Release pipeline:** a GitHub Actions workflow (or EAS/fastlane) builds the app, runs tests and scanners, and uploads to
+  TestFlight or the Play internal track. Promote to production by hand.
+
+## 33. Mobile security testing
+
+Test against the OWASP Mobile Application Security Verification Standard (MASVS) and its testing guide. Add these to the
+vulnerability catalog (section 13):
+
+| Vulnerability | Expected detector |
+|---|---|
+| API key or secret embedded in the app binary (anything in the app can be extracted) | Secret scanning, MobSF, the model |
+| Auth token stored in plain preferences instead of the iOS Keychain / Android Keystore | MobSF, code review, the model |
+| Cleartext (HTTP) traffic allowed, or TLS validation disabled | MobSF, CodeQL, code review |
+| Backend trusts the app's claim of "subscribed" without verifying the receipt | Tests, the model |
+| Missing authorization on the API (user A reads user B's location or subscription) | Tests, DAST |
+| Exported Android components or unvalidated deep links | MobSF, code review |
+| Excess location precision or retention beyond the stated policy | Code review, the model |
+
+Tooling: CodeQL supports several mobile-relevant languages (check current support for Swift, Kotlin/Java, and JavaScript/TypeScript),
+plus Dependabot for the app's dependencies, plus MobSF to analyze the built app. Run the API through ZAP with a test user, as in
+section 20. Every confirmed finding becomes a regression test (section 12). Never put a server-side secret (Stripe secret key,
+Apple or Google API credentials, signing keys) into the app itself. Only publishable keys and public identifiers belong there.
+
+## 34. Cost control / tearing it down
 
 Running: an ALB (~$16-20/month) + a small Fargate task (roughly a few dollars/month at this size)
 + negligible ECR/CloudWatch storage. Nothing here is free-tier-eligible long-term. When you're
