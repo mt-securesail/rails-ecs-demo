@@ -45,3 +45,8 @@ jobs:
         with:
           sarif_file: brakeman-results.sarif
           category: brakeman
+          # On pull requests, attach results to the PR's head commit (stable) instead of
+          # GitHub's temporary merge commit, which changes and can leave the
+          # "code scanning results" rule waiting forever.
+          ref: ${{ github.event.pull_request && format('refs/pull/{0}/head', github.event.number) || github.ref }}
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
