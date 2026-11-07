@@ -20,6 +20,3 @@ bundle install
 bin/rails server
 # visit http://localhost:3000
 ```
-
-
-Ruleset test line.
