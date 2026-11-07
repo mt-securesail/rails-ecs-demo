@@ -6,5 +6,9 @@ project_name = "rails-ecs-demo"
 github_org   = "your-github-username"
 github_repo  = "rails-ecs-demo"
 
+# Who can reach the load balancer. Use your own public IP with /32.
+# Find it with: curl -s https://checkip.amazonaws.com
+allowed_cidrs = ["203.0.113.7/32"]
+
 # Do NOT put secret_key_base here. Pass it at apply time instead:
 #   terraform apply -var="secret_key_base=$(openssl rand -hex 64)"
