@@ -26,6 +26,16 @@ variable "github_oidc_sub_prefix" {
   default     = null
 }
 
+variable "allowed_cidrs" {
+  description = "IP ranges allowed to reach the load balancer, e.g. [\"203.0.113.7/32\"] for a single address. Use [\"0.0.0.0/0\"] only to open it to the whole internet."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.allowed_cidrs) > 0
+    error_message = "allowed_cidrs must contain at least one CIDR range."
+  }
+}
+
 variable "container_port" {
   description = "Port the Rails app listens on inside the container"
   type        = number
