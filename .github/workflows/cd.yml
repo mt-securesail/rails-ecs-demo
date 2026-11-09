@@ -4,13 +4,11 @@ on:
   push:
     branches: [main]
 
-# id-token: write is required for OIDC — this is what lets Actions get
-# temporary AWS credentials without any AWS access key stored in GitHub.
+# Each job below sets its own permissions; this is the default for anything else.
 permissions:
-  id-token: write
   contents: read
 
-# Only one deploy runs at a time. A newer push waits for the running deploy
+# Only one run (CI + deploy) at a time. A newer push waits for the running one
 # to finish (and replaces any older waiting one) instead of starting a second
 # ECS deployment that supersedes the first.
 concurrency:
@@ -26,8 +24,22 @@ env:
   CONTAINER_NAME: ${{ vars.CONTAINER_NAME }}
 
 jobs:
+  # Run the same tests and Brakeman scan as on pull requests (ci.yml),
+  # against exactly the commit that is about to be deployed.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      security-events: write # Brakeman uploads its results to code scanning
+
   deploy:
+    needs: ci # deploy only if every CI job passed
     runs-on: ubuntu-latest
+    # id-token: write is required for OIDC — this is what lets Actions get
+    # temporary AWS credentials without any AWS access key stored in GitHub.
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v7
 
