@@ -38,6 +38,7 @@ Do the steps in order — later steps assume earlier ones are done.
 18. Passkey login
 19. Okta single sign-on
 20. Security testing for authentication
+20a. Attack the login system with open-source AI pentest agents (PentAGI, HexStrike AI, Cairn, ARTEX)
 21. Opening signups to the public (or deciding not to)
 
 **Part D — The weather-prep email product and billing (sections 22-27)**
@@ -557,6 +558,69 @@ confirmed finding into a regression test (section 12): for example, tests assert
 responses for known and unknown emails, that a second user can't fetch the first user's record, and that
 the 11th rapid login attempt is rejected.
 
+## 20a. Attack the login system with open-source AI pentest agents
+
+Before opening signups (section 21) and before connecting billing (Part D), point autonomous AI pentest agents at the
+login system and confirm there are no major problems. Scanners like ZAP check requests one at a time; these agents chain
+steps together (sign up, log in, change an ID, replay a token), which is how most authentication flaws are found.
+
+Copies of four tools are kept in a private archive repo, one branch per tool, in case the upstream projects disappear:
+
+| Tool | Upstream | License |
+|---|---|---|
+| PentAGI | github.com/vxcontrol/pentagi | MIT |
+| HexStrike AI | github.com/0x4m4/hexstrike-ai | MIT |
+| Cairn | github.com/oritera/Cairn | AGPL-3.0 |
+| ARTEX | github.com/Hinln/ARTEX (mirror; the original `Autumn-27/ARTEX` was removed) | AGPL-3.0 |
+
+Check upstream first for newer versions, and read each tool's README for its current setup steps.
+
+**Before the first run**
+
+- **Isolate the tools.** Run them in a separate virtual machine or container, not directly on your Mac. They must not be able to
+  read your home folder, AWS credentials, SSH keys, GitHub tokens, or `infra/terraform.tfvars`. Treat the tools and everything
+  they output as untrusted code.
+- **ARTEX self-update.** The mirror's latest commit changed self-update to download releases from `Hinln/ARTEX`, which you
+  can't verify. Turn self-update off, or check out the commit before that change.
+- **Model access.** Use a new API key used only for this, with a spending limit, or a local model (section 14). Never reuse
+  a key from anything else.
+- **Scope.** Give each tool only your own app's URL. Run from the IP in `allowed_cidrs` (section 10) so the IP lock stays on.
+  Check AWS's penetration-testing policy for the services involved. Don't enable denial-of-service, brute-force-at-volume, or
+  "exploit anything reachable" modes.
+- **Test data.** Create two test users (A and B) on the deployed app, so the agents can try to reach one user's data as the other.
+  Never use a real account. Deploy the planted login flaws from section 20 on an environment you can reset.
+
+**Running and scoring**
+
+1. Run one tool at a time, with a small first scope (signup, login, password reset). Record run time and model cost.
+2. For each finding, reproduce it yourself before trusting it. Expect false positives.
+3. Record results in `docs/vuln-catalog.md`: add each tool to "Detected by" or "Missed by" for every section 20 row.
+   Log anything real that you didn't plant in `docs/findings-log.md`.
+4. Compare with ZAP (section 11), the open-weight model (section 14), and AWS Security Agent (section 14b) if you ran it.
+
+**Turning findings into regression tests**
+
+The agents find problems; tests keep them from coming back. The agents themselves never run in CI (they're slow, cost money,
+and give different results on each run). For every confirmed finding:
+
+1. Write a Rails integration test in `test/integration/` that reproduces the attack and asserts the safe behavior.
+   Confirm it **fails** on the vulnerable code and **passes** after the fix. For example:
+
+   ```ruby
+   test "a user cannot read another user's profile" do
+     sign_in_as users(:a)
+     get profile_path(users(:b))
+     assert_response :not_found
+   end
+   ```
+
+2. Fix the code on a branch and open a PR. The CI `test` job runs `bin/rails test`, which picks up the new test
+   automatically. `test` is a required check in the `protect-main` ruleset, so the fix can't merge without it, and
+   nothing reaches production without merging.
+3. Log it in `docs/findings-log.md` (section 12).
+
+**Gate for section 21:** open signups only when every critical or high finding is fixed and has a regression test.
+
 ## 21. Opening signups to the public (or deciding not to)
 
 Public signups mean you hold real people's emails and password hashes. Do this only when you're comfortable:
@@ -667,6 +731,9 @@ Add these to the vulnerability catalog (section 13) and run them through the det
 
 Regression tests to add as you fix each one: webhook with a bad signature is rejected, the same event twice causes one
 state change, an email is never sent to a canceled or unpaid subscriber, and a tampered price is ignored.
+
+Re-run the AI pentest agents from section 20a against the billing and email flows (webhooks, price tampering,
+one user reaching another's subscription), with the same isolation and scoring rules.
 
 ## 27. Going live (optional)
 
