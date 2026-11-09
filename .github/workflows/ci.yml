@@ -2,8 +2,10 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  # On pushes to main, the deploy workflow (cd.yml) calls this workflow and
+  # deploys only if every job here passes. A separate push trigger would just
+  # run the same checks twice.
+  workflow_call:
 
 permissions:
   contents: read
