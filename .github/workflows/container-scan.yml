@@ -1,0 +1,79 @@
+name: Container Scan
+
+# Builds the Docker image on every PR and scans it. The full report goes to
+# code scanning (Security tab); the job fails only on critical or high
+# findings that have a published fix (plus any secrets found in the image).
+#
+# This job runs on every PR, even docs-only ones, because it is a required
+# check: a required check that doesn't run leaves the PR waiting forever.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: rails-ecs-demo:scan
+  # Trivy is downloaded directly instead of through aquasecurity/trivy-action,
+  # whose tags were hijacked in the March 2026 supply-chain attack
+  # (CVE-2026-33634). The checksum below was taken from GitHub's record of the
+  # immutable release asset and matched the release's checksums file
+  # (2026-11-09). To upgrade, update both values the same way.
+  TRIVY_VERSION: 0.76.1
+  TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+
+jobs:
+  trivy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload results to code scanning
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t "$IMAGE" .
+
+      - name: Install Trivy (pinned version, verified checksum)
+        run: |
+          curl -sSfL -o trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/trivy"
+          tar -xzf trivy.tar.gz -C "$RUNNER_TEMP/trivy" trivy
+          rm trivy.tar.gz
+          echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
+
+      - name: Get today's date (for the database cache key)
+        id: date
+        run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      # Reuse the vulnerability database within a day so every PR doesn't
+      # download it again (and a download hiccup is less likely to block a merge).
+      - name: Cache vulnerability database
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ steps.date.outputs.today }}
+          restore-keys: trivy-db-
+
+      - name: Scan image (full report for code scanning)
+        run: |
+          trivy image --scanners vuln,secret \
+            --format sarif --output trivy-results.sarif "$IMAGE"
+
+      - name: Upload results to code scanning
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+
+      # The gate. Exceptions go in .trivyignore.yaml, each with a reason and an
+      # expiry date.
+      - name: Fail on fixable critical or high findings
+        run: |
+          trivy image --skip-db-update --scanners vuln,secret \
+            --severity CRITICAL,HIGH --ignore-unfixed \
+            --ignorefile .trivyignore.yaml \
+            --exit-code 1 "$IMAGE"
