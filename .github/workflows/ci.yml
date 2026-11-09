@@ -17,7 +17,7 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.2'
+          ruby-version: '3.4'
           bundler-cache: true
 
       - name: Run tests
@@ -30,18 +30,26 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.2'
+          ruby-version: '3.4'
           bundler-cache: true
 
-      # Brakeman exits non-zero when it finds warnings. We don't want that to
-      # block the SARIF upload below, so `|| true` here — the actual gate is
-      # the GitHub code scanning alert, which you can require in branch
-      # protection later if you want.
+      # Brakeman exits non-zero when it finds warnings. Let this step continue
+      # so the results still get uploaded for viewing, then fail the job below.
+      # The job's pass/fail result is what the branch ruleset requires.
       - name: Run Brakeman
-        run: bundle exec brakeman -f sarif -o brakeman-results.sarif || true
+        id: brakeman
+        continue-on-error: true
+        run: bundle exec brakeman -f sarif -o brakeman-results.sarif
 
       - name: Upload Brakeman SARIF to code scanning
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: brakeman-results.sarif
           category: brakeman
+
+      - name: Fail the job if Brakeman found problems
+        if: steps.brakeman.outcome == 'failure'
+        run: |
+          echo "Brakeman reported warnings or errors. See the code scanning results."
+          exit 1
