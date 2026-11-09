@@ -1,0 +1,24 @@
+name: Dependency Review
+
+# Compares the dependencies on the PR branch with the base branch and fails
+# if the PR adds a package version with a known vulnerability. It only looks
+# at what the PR changes; Dependabot alerts cover what is already on main.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write # lets the action post a summary comment when it fails
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v5
+        with:
+          # Fail on any known vulnerability, including low severity.
+          fail-on-severity: low
+          comment-summary-in-pr: on-failure
