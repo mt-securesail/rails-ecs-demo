@@ -203,6 +203,7 @@ GEM
       tsort
     reline (0.7.0)
       io-console (~> 0.5)
+    rubyzip (1.2.1)
     securerandom (0.4.1)
     thor (1.5.0)
     timeout (0.6.1)
@@ -231,6 +232,7 @@ DEPENDENCIES
   brakeman
   puma (~> 7.2)
   rails (~> 8.1)
+  rubyzip (= 1.2.1)
 
 CHECKSUMS
   action_text-trix (2.1.19) sha256=7012f59421009cf284aa651294896414d653a61a2417c9b8714c8476d2f74009
@@ -304,6 +306,7 @@ CHECKSUMS
   rbs (4.2.0) sha256=51f7b886dcc05bc09e10b901daa6a81829f6adc03101d6ca9ea4aac6103e0674
   rdoc (8.1.0) sha256=befc37880a5cfd36dcb176c748b5fd5ee39dd3536a75e81824e4972ce230f60a
   reline (0.7.0) sha256=5b012d8e55dbf9d450f12bde2cf7d15ff546ae80b3f8f3b30e570d431815583d
+  rubyzip (1.2.1) sha256=1f7f53c83752517fe764fe9451294d6f879d5e65b2ee46055308be6fff235a1a
   securerandom (0.4.1) sha256=cc5193d414a4341b6e225f0cb4446aceca8e50d5e1888743fac16987638ea0b1
   thor (1.5.0) sha256=e3a9e55fe857e44859ce104a84675ab6e8cd59c650a49106a05f55f136425e73
   timeout (0.6.1) sha256=78f57368a7e7bbadec56971f78a3f5ecbcfb59b7fcbb0a3ed6ddc08a5094accb
