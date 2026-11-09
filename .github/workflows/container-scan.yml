@@ -1,8 +1,8 @@
 name: Container Scan
 
-# Builds the Docker image on every PR and scans it. The full report goes to
-# code scanning (Security tab); the job fails only on critical or high
-# findings that have a published fix (plus any secrets found in the image).
+# Builds the Docker image on every PR and scans it. Critical and high findings
+# that have a published fix (plus any secrets found in the image) are uploaded
+# to code scanning (Security tab) and fail the job.
 #
 # This job runs on every PR, even docs-only ones, because it is a required
 # check: a required check that doesn't run leaves the PR waiting forever.
@@ -57,9 +57,14 @@ jobs:
           key: trivy-db-${{ steps.date.outputs.today }}
           restore-keys: trivy-db-
 
-      - name: Scan image (full report for code scanning)
+      # Only critical/high findings with a published fix go to code scanning,
+      # so the Security tab lists things you can act on. (An unfiltered scan of
+      # this image produced ~1,350 alerts, almost all unfixable.)
+      - name: Scan image (report for code scanning)
         run: |
           trivy image --scanners vuln,secret \
+            --severity CRITICAL,HIGH --ignore-unfixed \
+            --ignorefile .trivyignore.yaml \
             --format sarif --output trivy-results.sarif "$IMAGE"
 
       - name: Upload results to code scanning

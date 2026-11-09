@@ -3,7 +3,10 @@ FROM ruby:3.4-slim
 
 WORKDIR /app
 
+# apt-get upgrade applies Debian security fixes that the base image doesn't
+# have yet (for example zlib CVE-2026-85091, found by Trivy).
 RUN apt-get update -qq && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends build-essential libyaml-dev pkg-config curl && \
     rm -rf /var/lib/apt/lists/*
 
