@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1
-FROM ruby:3.4-slim
+# Pinned to an exact digest so the image scanned on a PR is built from the same
+# base as the one deployed. Dependabot (.github/dependabot.yml) opens a PR when
+# ruby:3.4-slim gets a new digest; that PR goes through the same scans.
+FROM ruby:3.4-slim@sha256:65680693964528b522a38d85ec5065538c7ab9e75268802aab9770f39ee56de0
 
 WORKDIR /app
 

@@ -4,6 +4,8 @@ name: Container Scan
 # scanners, Trivy and Grype (separate jobs, both required checks). For each,
 # critical and high findings that have a published fix are uploaded to code
 # scanning (Security tab) and fail the job. Trivy also fails on secrets.
+# A third job (trivy-config) scans the Terraform and Dockerfile for
+# misconfigurations.
 #
 # This job runs on every PR, even docs-only ones, because it is a required
 # check: a required check that doesn't run leaves the PR waiting forever.
@@ -88,6 +90,48 @@ jobs:
             --severity CRITICAL,HIGH --ignore-unfixed \
             --ignorefile .trivyignore.yaml \
             --exit-code 1 "$IMAGE"
+
+  # Scans configuration files, not the image: the Terraform in infra/ and the
+  # Dockerfile. Fails on critical or high misconfigurations. Uses the same
+  # pinned Trivy, so it adds no new third-party code to the pipeline.
+  trivy-config:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload results to code scanning
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Trivy (pinned version, verified checksum)
+        run: |
+          curl -sSfL -o trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/trivy"
+          tar -xzf trivy.tar.gz -C "$RUNNER_TEMP/trivy" trivy
+          rm trivy.tar.gz
+          echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
+
+      - name: Scan Terraform and Dockerfile (report for code scanning)
+        run: |
+          trivy config --severity CRITICAL,HIGH \
+            --ignorefile .trivyignore.yaml \
+            --format sarif --output trivy-config-results.sarif .
+
+      - name: Upload results to code scanning
+        if: always() && hashFiles('trivy-config-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-config-results.sarif
+          category: trivy-config
+
+      # The gate. Exceptions go in .trivyignore.yaml (misconfigurations
+      # section), each with a reason and an expiry date.
+      - name: Fail on critical or high misconfigurations
+        run: |
+          trivy config --severity CRITICAL,HIGH \
+            --ignorefile .trivyignore.yaml \
+            --exit-code 1 .
 
   grype:
     runs-on: ubuntu-latest
