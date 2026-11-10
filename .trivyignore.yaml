@@ -7,6 +7,12 @@
 #
 # Add or change entries only through a PR, and log them in docs/findings-log.md.
 #
+# Terraform misconfiguration exceptions (trivy-config job) are NOT kept here.
+# They're inline comments directly above the resource in infra/*.tf
+# (#trivy:ignore:<ID>, optionally :exp:<date>), so each one covers exactly one
+# resource and sits next to the code it excuses. Find them all with:
+#   grep -rn "trivy:ignore" infra/
+#
 # Example:
 # vulnerabilities:
 #   - id: CVE-2026-12345

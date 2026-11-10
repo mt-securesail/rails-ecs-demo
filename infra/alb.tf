@@ -1,9 +1,16 @@
+# Exception: Trivy flags a public ALB (AWS-0053). It's public by design; access
+# is limited to allowed_cidrs by its security group. Decided by Matt,
+# 2026-11-10. Revisit in DEPLOYMENT_GUIDE section 21 (opening signups).
+#trivy:ignore:AWS-0053
 resource "aws_lb" "this" {
   name               = "${var.project_name}-alb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = data.aws_subnets.default.ids
+
+  # Reject requests with malformed headers (request-smuggling defense; Trivy AWS-0052).
+  drop_invalid_header_fields = true
 }
 
 resource "aws_lb_target_group" "this" {
@@ -22,6 +29,11 @@ resource "aws_lb_target_group" "this" {
   }
 }
 
+# Exception: Trivy flags the HTTP (not HTTPS) listener (AWS-0054). HTTPS needs a
+# domain and certificate, planned in DEPLOYMENT_GUIDE section 16; until then
+# traffic is limited to allowed_cidrs. Decided by Matt, 2026-11-10.
+# Revisit (and remove) in section 16.
+#trivy:ignore:AWS-0054
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.this.arn
   port              = 80

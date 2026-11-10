@@ -1,0 +1,9 @@
+# Dependabot version updates. (Security updates for gems are turned on
+# separately in the repo settings.)
+version: 2
+updates:
+  # Keeps the pinned base image digest in the Dockerfile current.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
