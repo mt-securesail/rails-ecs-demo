@@ -24,11 +24,15 @@ resource "aws_security_group" "alb" {
     cidr_blocks = var.allowed_cidrs
   }
 
+  # The ALB only needs to reach the app containers (and health-check them) on
+  # the container port inside this VPC. (Pointing at the service security
+  # group instead would create a circular reference between the two groups.)
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    description = "To app containers in this VPC"
+    from_port   = var.container_port
+    to_port     = var.container_port
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.default.cidr_block]
   }
 }
 
@@ -44,10 +48,17 @@ resource "aws_security_group" "service" {
     security_groups = [aws_security_group.alb.id]
   }
 
+  # Outbound HTTPS only. The task needs it to pull its image (ECR), send logs
+  # (CloudWatch), and read SECRET_KEY_BASE (SSM); later, for outside APIs.
+  # Exception: Trivy flags any 0.0.0.0/0 egress (AWS-0104). Removing it needs
+  # VPC endpoints (~$7+/month each), declined for now to avoid cost.
+  # Decided by Matt, 2026-11-10. Review by 2027-01-31.
+  #trivy:ignore:AWS-0104:exp:2027-01-31
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "Outbound HTTPS"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }

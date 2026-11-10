@@ -125,8 +125,8 @@ jobs:
           sarif_file: trivy-config-results.sarif
           category: trivy-config
 
-      # The gate. Exceptions go in .trivyignore.yaml (misconfigurations
-      # section), each with a reason and an expiry date.
+      # The gate. Exceptions are inline "#trivy:ignore:<ID>" comments directly
+      # above the resource in infra/*.tf, each with a reason and a review point.
       - name: Fail on critical or high misconfigurations
         run: |
           trivy config --severity CRITICAL,HIGH \

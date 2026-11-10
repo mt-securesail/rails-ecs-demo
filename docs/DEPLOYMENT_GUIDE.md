@@ -499,6 +499,10 @@ Authentication needs things the app doesn't have yet:
   domain verified; new SES accounts start in a sandbox that only sends to verified addresses).
 - **A private network layout.** Move the app tasks to private subnets behind a NAT gateway or VPC endpoints,
   rather than the default VPC with public IPs. This also adds cost.
+- **Remove the Trivy exceptions this resolves.** Once the HTTPS listener exists, delete the `#trivy:ignore:AWS-0054`
+  exception above the HTTP listener in `infra/alb.tf`. If you add VPC endpoints, also remove `#trivy:ignore:AWS-0104`
+  from the service security group in `infra/networking.tf` (that one also expires on 2027-01-31). The `trivy-config` check
+  confirms the fix.
 
 ## 17. Email + password signup
 
@@ -633,6 +637,8 @@ Public signups mean you hold real people's emails and password hashes. Do this o
   that stores real user data.
 - A lower-risk alternative: keep the app restricted to your IP and use only test accounts and Okta test users.
   You'll learn nearly the same thing without holding anyone else's data.
+- **Revisit the public-ALB Trivy exception** (`#trivy:ignore:AWS-0053` in `infra/alb.tf`). If signups open, record why a
+  public ALB is still acceptable (WAF, HTTPS, rate limits) or redesign. If they stay closed, keep the exception and the IP lock.
 
 ---
 
