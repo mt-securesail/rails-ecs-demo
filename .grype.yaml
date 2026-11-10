@@ -1,0 +1,16 @@
+# Grype configuration, read automatically by the grype job in
+# .github/workflows/container-scan.yml.
+#
+# Add an ignore rule only when a finding can't be fixed right now. Grype has no
+# expiry field, so every entry must have a comment with:
+#   - why it's accepted, and who decided
+#   - an expiry date (review and remove the entry by then)
+# Add or change entries only through a PR, and log them in docs/findings-log.md.
+#
+# Example:
+# ignore:
+#   # No fixed package in Debian yet; app doesn't use the affected feature.
+#   # Decided by Matt. Expires 2026-12-31.
+#   - vulnerability: CVE-2026-12345
+
+ignore: []
