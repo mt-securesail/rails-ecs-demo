@@ -1,8 +1,9 @@
 name: Container Scan
 
-# Builds the Docker image on every PR and scans it. Critical and high findings
-# that have a published fix (plus any secrets found in the image) are uploaded
-# to code scanning (Security tab) and fail the job.
+# Builds the Docker image on every PR and scans it with two independent
+# scanners, Trivy and Grype (separate jobs, both required checks). For each,
+# critical and high findings that have a published fix are uploaded to code
+# scanning (Security tab) and fail the job. Trivy also fails on secrets.
 #
 # This job runs on every PR, even docs-only ones, because it is a required
 # check: a required check that doesn't run leaves the PR waiting forever.
@@ -21,6 +22,11 @@ env:
   # (2026-11-09). To upgrade, update both values the same way.
   TRIVY_VERSION: 0.76.1
   TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+  # Grype is downloaded the same way (not anchore/scan-action). Checksum taken
+  # from GitHub's record of the immutable release asset and matched the
+  # release's checksums file (2026-11-09).
+  GRYPE_VERSION: 0.121.0
+  GRYPE_SHA256: 64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519
 
 jobs:
   trivy:
@@ -82,3 +88,74 @@ jobs:
             --severity CRITICAL,HIGH --ignore-unfixed \
             --ignorefile .trivyignore.yaml \
             --exit-code 1 "$IMAGE"
+
+  grype:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload results to code scanning
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t "$IMAGE" .
+
+      - name: Install Grype (pinned version, verified checksum)
+        run: |
+          curl -sSfL -o grype.tar.gz \
+            "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          echo "${GRYPE_SHA256}  grype.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/grype"
+          tar -xzf grype.tar.gz -C "$RUNNER_TEMP/grype" grype
+          rm grype.tar.gz
+          echo "$RUNNER_TEMP/grype" >> "$GITHUB_PATH"
+
+      - name: Get today's date (for the database cache key)
+        id: date
+        run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache vulnerability database
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/grype
+          key: grype-db-${{ steps.date.outputs.today }}
+          restore-keys: grype-db-
+
+      # One scan, two outputs: a readable table in the log and SARIF for code
+      # scanning. --only-fixed drops findings without a published fix;
+      # --fail-on high fails on high or critical. Exceptions go in .grype.yaml.
+      # The exit code is saved so results are uploaded before the job fails.
+      - name: Scan image
+        id: scan
+        run: |
+          set +e
+          grype "docker:$IMAGE" --only-fixed --fail-on high \
+            -o table -o sarif=grype-all.sarif
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      # Grype's SARIF has every fixable finding (any severity). Keep only rules
+      # that GitHub will label high or critical (security-severity >= 7.0).
+      - name: Keep only critical and high findings for code scanning
+        if: always() && hashFiles('grype-all.sarif') != ''
+        run: |
+          jq '(.runs[0].tool.driver.rules
+                | map(select((.properties["security-severity"] // "0" | tonumber) >= 7) | .id)) as $keep
+              | .runs[0].tool.driver.rules |= map(select(.id as $id | $keep | index($id)))
+              | .runs[0].results |= map(select(.ruleId as $id | $keep | index($id)))' \
+            grype-all.sarif > grype-results.sarif
+          echo "Findings uploaded to code scanning: $(jq '.runs[0].results | length' grype-results.sarif) (of $(jq '.runs[0].results | length' grype-all.sarif) fixable findings)"
+
+      - name: Upload results to code scanning
+        if: always() && hashFiles('grype-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: grype-results.sarif
+          category: grype
+
+      - name: Fail on fixable critical or high findings
+        run: |
+          code='${{ steps.scan.outputs.exit_code }}'
+          if [ "$code" != "0" ]; then
+            echo "Grype found fixable critical/high vulnerabilities, or failed to run (exit code: ${code:-none}). See the 'Scan image' step."
+            exit 1
+          fi
