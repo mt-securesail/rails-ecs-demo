@@ -6,3 +6,14 @@
 #         they're fixed, so they can't come back.
 # IGNORE = accepted. Add a comment line above with the reason, who decided,
 #         and a review date, and log it in docs/findings-log.md.
+
+# Fixed 2026-11-11 (findings log #11-#13). FAIL so they can't come back.
+10038	FAIL	(Content Security Policy (CSP) Header Not Set)
+10063	FAIL	(Permissions Policy Header Not Set)
+90004	FAIL	(Insufficient Site Isolation Against Spectre Vulnerability)
+
+# Accepted 2026-11-11 (findings log #14): informational. Pages are dynamic and
+# intentionally not stored by any cache (every response sends Cache-Control:
+# no-store, config/initializers/no_store.rb; checked by test/security/security_headers_test.rb). Decided by Matt.
+# Review in DEPLOYMENT_GUIDE section 21.
+10049	IGNORE	(Non-Storable Content)
