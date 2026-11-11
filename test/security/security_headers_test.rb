@@ -54,6 +54,20 @@ class SecurityHeadersTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # CSRF protection is off in the test environment by default; turn it on, as
+  # in production, to check a token-less POST to an unknown path still gets
+  # a normal 404 page with the security headers (not an error).
+  test "POST to an unknown path without a CSRF token gets a 404 with headers" do
+    original = ActionController::Base.allow_forgery_protection
+    ActionController::Base.allow_forgery_protection = true
+    post "/nope"
+    assert_response :not_found
+    assert response.headers["Content-Security-Policy"].present?
+    assert_equal "no-store", response.headers["Cache-Control"]
+  ensure
+    ActionController::Base.allow_forgery_protection = original
+  end
+
   test "home page styles are allowed by the CSP nonce, with no inline style attributes" do
     get "/"
     nonce = response.headers["Content-Security-Policy"][/'nonce-([^']+)'/, 1]
