@@ -7,3 +7,19 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # Keeps the GitHub Actions in .github/workflows/ current. Each action is
+  # pinned to a full commit ID (with a "# vX.Y.Z" comment), so a moved or
+  # hijacked tag can't change what runs; Dependabot updates both together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # One PR for all action updates (each merge to main is a deploy).
+    groups:
+      actions:
+        patterns: ["*"]
+    # Wait a week after a release before proposing it, so a malicious release
+    # is likely to be found and pulled before it reaches this repo.
+    cooldown:
+      default-days: 7

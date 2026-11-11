@@ -37,7 +37,7 @@ jobs:
       contents: read
       security-events: write # upload results to code scanning
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build image
         run: docker build -t "$IMAGE" .
@@ -59,7 +59,7 @@ jobs:
       # Reuse the vulnerability database within a day so every PR doesn't
       # download it again (and a download hiccup is less likely to block a merge).
       - name: Cache vulnerability database
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/trivy
           key: trivy-db-${{ steps.date.outputs.today }}
@@ -77,7 +77,7 @@ jobs:
 
       - name: Upload results to code scanning
         if: always() && hashFiles('trivy-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy-results.sarif
           category: trivy
@@ -100,7 +100,7 @@ jobs:
       contents: read
       security-events: write # upload results to code scanning
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Trivy (pinned version, verified checksum)
         run: |
@@ -120,7 +120,7 @@ jobs:
 
       - name: Upload results to code scanning
         if: always() && hashFiles('trivy-config-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy-config-results.sarif
           category: trivy-config
@@ -139,7 +139,7 @@ jobs:
       contents: read
       security-events: write # upload results to code scanning
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build image
         run: docker build -t "$IMAGE" .
@@ -159,7 +159,7 @@ jobs:
         run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
       - name: Cache vulnerability database
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/grype
           key: grype-db-${{ steps.date.outputs.today }}
@@ -191,7 +191,7 @@ jobs:
 
       - name: Upload results to code scanning
         if: always() && hashFiles('grype-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: grype-results.sarif
           category: grype
