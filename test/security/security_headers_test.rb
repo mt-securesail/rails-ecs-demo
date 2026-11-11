@@ -47,12 +47,10 @@ class SecurityHeadersTest < ActionDispatch::IntegrationTest
     end
 
     # ZAP [10049] Non-Storable Content: accepted (see .zap/rules.tsv). This
-    # locks in the intended behavior: pages are never stored by shared caches.
-    test "#{name} is not cacheable by shared caches" do
+    # locks in the intended behavior: no cache (shared or browser) stores pages.
+    test "#{name} tells caches not to store it" do
       get path
-      cache = response.headers["Cache-Control"].to_s
-      assert cache.include?("private") || cache.include?("no-store"),
-        "Cache-Control should be private or no-store, got: #{cache.inspect}"
+      assert_equal "no-store", response.headers["Cache-Control"]
     end
   end
 

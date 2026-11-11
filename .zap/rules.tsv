@@ -13,7 +13,7 @@
 90004	FAIL	(Insufficient Site Isolation Against Spectre Vulnerability)
 
 # Accepted 2026-11-11 (findings log #14): informational. Pages are dynamic and
-# intentionally not stored by shared caches (Cache-Control private/no-store,
-# checked by test/security/security_headers_test.rb). Decided by Matt.
+# intentionally not stored by any cache (every response sends Cache-Control:
+# no-store, config/initializers/no_store.rb; checked by test/security/security_headers_test.rb). Decided by Matt.
 # Review in DEPLOYMENT_GUIDE section 21.
 10049	IGNORE	(Non-Storable Content)
