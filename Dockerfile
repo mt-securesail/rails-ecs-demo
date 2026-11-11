@@ -2,7 +2,7 @@
 # Pinned to an exact digest so the image scanned on a PR is built from the same
 # base as the one deployed. Dependabot (.github/dependabot.yml) opens a PR when
 # ruby:3.4-slim gets a new digest; that PR goes through the same scans.
-FROM ruby:3.4-slim@sha256:65680693964528b522a38d85ec5065538c7ab9e75268802aab9770f39ee56de0
+FROM ruby:4.0-slim@sha256:d8cb2c0714bdaba0f318af897a01d2dbde3cfa8e62d47e99cea55feb13c0e90d
 
 WORKDIR /app
 
