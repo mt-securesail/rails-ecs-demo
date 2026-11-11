@@ -1,0 +1,73 @@
+name: ZAP Baseline (PR)
+
+# Runs the app on the GitHub runner and scans it with OWASP ZAP's baseline
+# scan. Baseline = crawl the site and passively inspect responses (headers,
+# cookies, error pages); no attack traffic. Nothing leaves the runner, so the
+# ALB IP allow-list doesn't matter and AWS isn't involved.
+#
+# Report-only to start: the job fails only if ZAP itself errors or a rule
+# marked FAIL in .zap/rules.tsv is triggered (none yet). Results are in the job
+# summary and the "zap-report" artifact. ZAP has no code scanning (SARIF)
+# upload here: its findings are URLs, not lines of code.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: rails-ecs-demo:zap
+  # Official image (ghcr.io/zaproxy/zaproxy:stable), pinned by digest so a
+  # changed tag can't change what runs. Digest checked 2026-11-11 (image built
+  # 2026-11-03). To upgrade, look up the new "stable" digest and replace it.
+  ZAP_IMAGE: ghcr.io/zaproxy/zaproxy@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
+
+jobs:
+  zap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build image
+        run: docker build -t "$IMAGE" .
+
+      # SECRET_KEY_BASE is a throwaway random value made for this run only;
+      # the real one stays in AWS SSM.
+      - name: Start the app
+        run: |
+          docker network create zapnet
+          docker run -d --name app --network zapnet -p 3000:3000 \
+            -e SECRET_KEY_BASE="$(openssl rand -hex 64)" "$IMAGE"
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/up > /dev/null; then echo "App is up"; exit 0; fi
+            sleep 2
+          done
+          echo "App did not start:"; docker logs app; exit 1
+
+      # -t target, -c rule levels, -I don't fail on warnings, -m spider minutes.
+      # ZAP runs as uid 1000, so the output folder must be writable by it.
+      - name: Scan with ZAP baseline
+        run: |
+          mkdir -p zap-out && chmod 777 zap-out
+          cp .zap/rules.tsv zap-out/rules.tsv
+          docker run --rm --network zapnet -v "$PWD/zap-out:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-baseline.py -t http://app:3000 -c rules.tsv -I -m 1 \
+              -r report.html -w report.md -J report.json
+
+      - name: Add results to the job summary
+        if: always() && hashFiles('zap-out/report.md') != ''
+        run: cat zap-out/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload full report
+        if: always() && hashFiles('zap-out/report.html') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: zap-report
+          path: |
+            zap-out/report.html
+            zap-out/report.md
+            zap-out/report.json
+
+      - name: App logs (for debugging)
+        if: always()
+        run: docker logs app 2>&1 | tail -50
