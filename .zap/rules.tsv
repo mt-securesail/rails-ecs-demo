@@ -1,0 +1,8 @@
+# ZAP baseline rule levels, used by .github/workflows/zap.yml (and the
+# production scan). Format: <rule id><TAB><IGNORE|INFO|WARN|FAIL><TAB>(name)
+# Rules not listed here default to WARN (reported, doesn't fail the job).
+#
+# FAIL  = the job fails if this rule is triggered. Promote rules here once
+#         they're fixed, so they can't come back.
+# IGNORE = accepted. Add a comment line above with the reason, who decided,
+#         and a review date, and log it in docs/findings-log.md.
