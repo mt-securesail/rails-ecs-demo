@@ -7,6 +7,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # No automatic major Ruby upgrades (e.g. 3.x -> 4.x). A major upgrade must
+    # change the Dockerfile, .ruby-version and ci.yml together, so the tests
+    # run on the same Ruby as production; do it as a planned PR. Digest and
+    # minor updates still come through. (Findings log #16.)
+    ignore:
+      - dependency-name: ruby
+        update-types: ["version-update:semver-major"]
 
   # Keeps the GitHub Actions in .github/workflows/ current. Each action is
   # pinned to a full commit ID (with a "# vX.Y.Z" comment), so a moved or
