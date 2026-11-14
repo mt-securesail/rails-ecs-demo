@@ -27,6 +27,7 @@ Do the steps in order — later steps assume earlier ones are done.
 11. Widen detection: dependencies, container, Terraform, and a running-app (DAST) scan
 12. The feedback loop: every finding becomes a regression test or rule that gates future deploys
 13. Inject vulnerabilities on purpose and record which tool catches which class
+13a. A finding no scanner caught: handle an outside (unsolicited) vulnerability report and feed it back into the loop
 14. Add an open-weight model as an extra reviewer (static code + running app)
 14a. Try AWS Continuum code review (AWS Security Agent) on pull requests
 14b. Try AWS Security Agent penetration testing against the running app
@@ -444,6 +445,40 @@ Keep a catalog in `docs/vuln-catalog.md` with one row per vulnerability, each on
 
 Add a "Detected by" and "Missed by" column, filled in after each run. The misses are the most
 valuable output of the whole project: they show which class of flaw each tool cannot see.
+
+## 13a. A finding no scanner caught: an outside vulnerability report
+
+Section 13 asks "which tool catches which class?" This section starts from the other end: a vulnerability
+that **every** automated check misses, reported by someone outside the project. The scenario is an
+unsolicited report from a client who tested the app without permission (an unauthorized pentest). It
+practices handling a report that arrives by email or form, not from a scanner, and feeding it back into
+the section 12 loop.
+
+1. **Give reporters a private channel first.** This repo is public, so a report filed as a GitHub issue
+   would announce the vulnerability before it's fixed.
+   - **GitHub website:** Settings → Advanced Security (or "Code security") → turn on **Private vulnerability
+     reporting**. Reports then arrive as private security advisories that only maintainers can see.
+   - Add a `SECURITY.md`: how to report (the private advisory form, never public issues), what to expect
+     (acknowledgement time), what's in scope, and a safe-harbor statement for good-faith testing.
+2. **Plant a vulnerability that the current checks miss**, on a `vuln/` branch that is never merged. Pick a
+   class the tools can't see, such as a logic or design flaw, rather than a coding pattern a rule matches.
+   Confirm that every required check passes. That proves the gap is real.
+3. **Write the outside report**, as a client would: what they did, the request that shows it, the impact,
+   and no fix. Submit it through the private advisory form, as the "reporter". It is never published.
+4. **Handle it as an incident, not a scanner alert:**
+   - Acknowledge and triage: reproduce it, rate its severity (CVSS), and decide whether production is
+     affected. Here it never is, because the branch is never merged.
+   - Note the unauthorized testing itself as a separate issue (scope, logs, whether to respond). Don't
+     ignore a valid finding because of how it was found.
+   - Fix it in the advisory's temporary private fork, so the fix isn't public before it ships.
+5. **Close the loop (section 12),** plus one extra question: **why did every check miss it?**
+   - Add a regression test, and a custom rule if the pattern can be matched.
+   - Log it in `docs/findings-log.md` with the source "External report (unsolicited)". Also add a row to
+     `docs/vuln-catalog.md` with "Missed by: all automated checks".
+   - Decide what would catch the next one, for example a ZAP active scan, the model reviewer (section 14),
+     the AWS Security Agent (section 14a/14b), or a manual review checklist item.
+6. **Close the advisory** without publishing it, and record what the response looked like and how long
+   each step took.
 
 ## 14. Open-weight model as an extra reviewer
 
