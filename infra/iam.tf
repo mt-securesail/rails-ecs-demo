@@ -81,10 +81,14 @@ data "aws_iam_policy_document" "github_assume" {
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
     }
+    # Only workflow runs on the main branch (cd.yml, after a merge) can deploy.
+    # Runs from pull requests or other branches get a different "sub" and are
+    # refused. Note: if a job ever adds `environment:`, its sub becomes
+    # "<prefix>:environment:<name>" and this condition must change to match.
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${local.github_sub_prefix}:*"]
+      values   = ["${local.github_sub_prefix}:ref:refs/heads/main"]
     }
   }
 }
