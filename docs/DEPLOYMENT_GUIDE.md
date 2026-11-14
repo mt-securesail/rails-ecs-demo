@@ -454,31 +454,29 @@ unsolicited report from a client who tested the app without permission (an unaut
 practices handling a report that arrives by email or form, not from a scanner, and feeding it back into
 the section 12 loop.
 
-1. **Give reporters a private channel first.** This repo is public, so a report filed as a GitHub issue
-   would announce the vulnerability before it's fixed.
-   - **GitHub website:** Settings → Advanced Security (or "Code security") → turn on **Private vulnerability
-     reporting**. Reports then arrive as private security advisories that only maintainers can see.
-   - Add a `SECURITY.md`: how to report (the private advisory form, never public issues), what to expect
-     (acknowledgement time), what's in scope, and a safe-harbor statement for good-faith testing.
-2. **Plant a vulnerability that the current checks miss**, on a `vuln/` branch that is never merged. Pick a
+The report and its handling are simulated privately, outside this repo. Nothing about the report is
+committed: a real report stays private until it's fixed, and this repo is public.
+
+1. **Plant a vulnerability that the current checks miss**, on a `vuln/` branch that is never merged. Pick a
    class the tools can't see, such as a logic or design flaw, rather than a coding pattern a rule matches.
    Confirm that every required check passes. That proves the gap is real.
-3. **Write the outside report**, as a client would: what they did, the request that shows it, the impact,
-   and no fix. Submit it through the private advisory form, as the "reporter". It is never published.
-4. **Handle it as an incident, not a scanner alert:**
+2. **Receive the outside report**, written as a client would: what they did, the request that shows it,
+   the impact, and no fix.
+3. **Handle it as an incident, not a scanner alert:**
    - Acknowledge and triage: reproduce it, rate its severity (CVSS), and decide whether production is
      affected. Here it never is, because the branch is never merged.
    - Note the unauthorized testing itself as a separate issue (scope, logs, whether to respond). Don't
      ignore a valid finding because of how it was found.
-   - Fix it in the advisory's temporary private fork, so the fix isn't public before it ships.
-5. **Close the loop (section 12),** plus one extra question: **why did every check miss it?**
-   - Add a regression test, and a custom rule if the pattern can be matched.
-   - Log it in `docs/findings-log.md` with the source "External report (unsolicited)". Also add a row to
-     `docs/vuln-catalog.md` with "Missed by: all automated checks".
-   - Decide what would catch the next one, for example a ZAP active scan, the model reviewer (section 14),
-     the AWS Security Agent (section 14a/14b), or a manual review checklist item.
-6. **Close the advisory** without publishing it, and record what the response looked like and how long
-   each step took.
+4. **Close the loop privately (section 12),** plus one extra question: **why did every check miss it?**
+   Work out the fix, the regression test (and custom rule, if the pattern can be matched), and what would
+   catch the next one, for example a ZAP active scan, the model reviewer (section 14), or the AWS Security
+   Agent (sections 14a/14b).
+5. **Record how the response went**, privately: each step and how long it took.
+
+**Before real users (section 21):** give reporters a private channel. Without one, a reporter's only option
+on a public repo is a public issue, which announces the vulnerability before it's fixed. On the GitHub
+website: Settings → Advanced Security → turn on **Private vulnerability reporting**, and add a
+`SECURITY.md` (how to report, what's in scope, a safe-harbor statement for good-faith testing).
 
 ## 14. Open-weight model as an extra reviewer
 
