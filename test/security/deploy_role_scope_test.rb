@@ -1,6 +1,6 @@
 require "test_helper"
 
-# Regression guard for finding #25: the deploy role could update and describe
+# Regression guard for findings #25 and #26: the deploy role could update and describe
 # every ECS service in the AWS account ("*"), not just this app's. Reported by
 # the gpt-oss-120b AI review (guide section 14); no scanner flagged it.
 #
@@ -44,5 +44,24 @@ class DeployRoleScopeTest < ActiveSupport::TestCase
     end
 
     assert_empty offenders, "#{SERVICE_ACTIONS.join(' / ')} must name the service ARN, not \"*\":\n#{offenders.join("\n")}"
+  end
+
+  # Finding #26: iam:PassRole must name specific roles and only allow passing
+  # them to ECS tasks, so they can't be handed to another service.
+  test "iam:PassRole names specific roles and is limited to ECS tasks" do
+    passrole = statements.select { |_, _, text| text.include?('"iam:PassRole"') }
+    assert_not_empty passrole, "expected the deploy role to grant iam:PassRole"
+
+    offenders = passrole.filter_map do |path, line, text|
+      resources = text[/resources\s*=\s*\[(.*?)\]/m, 1].to_s
+      problems = []
+      problems << "resources use a wildcard" if resources.strip.empty? || resources.include?("*")
+      unless text.match?(/variable\s*=\s*"iam:PassedToService"/) && text.include?('"ecs-tasks.amazonaws.com"')
+        problems << "no iam:PassedToService = ecs-tasks.amazonaws.com condition"
+      end
+      "#{path}:#{line}: #{problems.join('; ')}" if problems.any?
+    end
+
+    assert_empty offenders, "iam:PassRole is too broad:\n#{offenders.join("\n")}"
   end
 end

@@ -140,10 +140,17 @@ data "aws_iam_policy_document" "github_deploy_permissions" {
     resources = [aws_ecs_service.this.id] # the service ARN
   }
 
+  # Pass the app's two roles to ECS tasks only, not to any other AWS service
+  # (findings log #26; test/security/deploy_role_scope_test.rb).
   statement {
     sid       = "PassRoles"
     actions   = ["iam:PassRole"]
     resources = [aws_iam_role.execution.arn, aws_iam_role.task.arn]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
   }
 }
 
