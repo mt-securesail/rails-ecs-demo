@@ -457,14 +457,23 @@ the section 12 loop.
 The report and its handling are simulated privately, outside this repo. Nothing about the report is
 committed: a real report stays private until it's fixed, and this repo is public.
 
-1. **Plant a vulnerability that the current checks miss**, on a `vuln/` branch that is never merged. Pick a
-   class the tools can't see, such as a logic or design flaw, rather than a coding pattern a rule matches.
-   Confirm that every required check passes. That proves the gap is real.
+1. **Plant a vulnerability that the current checks miss.** Pick a class the tools can't see, such as a logic
+   or design flaw, rather than a coding pattern a rule matches. Confirm that every required check passes.
+   That proves the gap is real.
+   - **This exercise is merged and deployed on purpose**, to practice the whole cycle in production:
+     introduce, remediate, prevent. It is a one-time exception, approved by the repo owner, to "never merge
+     experiments". The vulnerable lines carry a comment saying the bug is deliberate, and so does the PR.
+   - **Keep the live window short:** have the fix PR (removal and prevention checks) ready and green before
+     merging the bug.
+   - **Rotate any exposed secret** after the bug's tasks have started and before the fix deploys, so the fixed
+     tasks start with the new value.
 2. **Receive the outside report**, written as a client would: what they did, the request that shows it,
    the impact, and no fix.
 3. **Handle it as an incident, not a scanner alert:**
    - Acknowledge and triage: reproduce it, rate its severity (CVSS), and decide whether production is
-     affected. Here it never is, because the branch is never merged.
+     affected.
+   - Find out who else used it: the app's request logs (CloudWatch Logs) show who requested the page;
+     CloudTrail shows who read the exposed secret. HTTP requests to the app never appear in CloudTrail.
    - Note the unauthorized testing itself as a separate issue (scope, logs, whether to respond). Don't
      ignore a valid finding because of how it was found.
 4. **Close the loop privately (section 12),** plus one extra question: **why did every check miss it?**
@@ -473,10 +482,14 @@ committed: a real report stays private until it's fixed, and this repo is public
    Agent (sections 14a/14b).
 5. **Record how the response went**, privately: each step and how long it took.
 
-**Before real users (section 21):** give reporters a private channel. Without one, a reporter's only option
-on a public repo is a public issue, which announces the vulnerability before it's fixed. On the GitHub
-website: Settings → Advanced Security → turn on **Private vulnerability reporting**, and add a
-`SECURITY.md` (how to report, what's in scope, a safe-harbor statement for good-faith testing).
+**What happened (2026-11-14):** an unlinked `/diagnostics` page returning every environment variable,
+including `SECRET_KEY_BASE`, passed all ~30 automated checks (PR #31). It was live in production for about
+20 minutes, reachable only from the allow-listed IP. `SECRET_KEY_BASE` was rotated, then PR #32 removed the
+page and added three checks that catch this class: a route inventory, a ban on dumping the environment, and
+a canary leak test (findings log row 24). The logs showed only expected access, and also showed logging gaps,
+now listed in section 16.
+
+**Before real users:** give reporters a private channel (section 21).
 
 ## 14. Open-weight model as an extra reviewer
 
@@ -571,6 +584,17 @@ Authentication needs things the app doesn't have yet:
   exception above the HTTP listener in `infra/alb.tf`. If you add VPC endpoints, also remove `#trivy:ignore:AWS-0104`
   from the service security group in `infra/networking.tf` (that one also expires on 2027-01-31). The `trivy-config` check
   confirms the fix.
+- **Logs you can investigate with.** The section 13a exercise asked "who requested this page, and who read the
+  secret?" Only the app's own logs and CloudTrail's 90-day event history could answer, and they showed these gaps:
+  - **ALB access logs are off.** Turn them on, writing to an S3 bucket with a lifecycle rule. They record every
+    request the ALB receives, even ones the app never logs.
+  - **VPC flow logs are off.** Without them, connections the security group blocks leave no record.
+  - **App logs are kept 14 days** (`/ecs/rails-ecs-demo`). A report that arrives later can't be investigated.
+    Keep them at least 90 days.
+  - **No trail for this project.** CloudTrail's event history keeps 90 days of management events. Add a
+    multi-region trail to S3 with log file validation, so the record lasts and can't be quietly edited.
+  All four add some cost (S3 storage, and flow logs per GB). The Trivy config scan may already flag the
+  ALB and VPC ones.
 
 ## 17. Email + password signup
 
@@ -699,6 +723,12 @@ Public signups mean you hold real people's emails and password hashes. Do this o
 
 - Before opening up: HTTPS only, AWS WAF with rate-based rules on the ALB, logging and alarms
   (CloudWatch, GuardDuty), encrypted RDS with automated backups, and the whole catalog re-run.
+- **A private way to report vulnerabilities.** This repo is public, so without one, a reporter's only option is a
+  public GitHub issue, which announces the vulnerability before it's fixed. On the GitHub website: Settings →
+  Advanced Security → turn on **Private vulnerability reporting** (reports arrive as private security advisories,
+  and fixes can be made in a temporary private fork). Add a `SECURITY.md`: how to report (the private form, never
+  public issues), how fast you'll acknowledge, what's in scope, and a safe-harbor statement for good-faith testing.
+  Section 13a practiced handling such a report.
 - Consider a privacy notice, a data-retention rule, and an account-deletion path.
 - Remember that section 10 locked the ALB to your IP. Opening signups reverses that. Keep a separate,
   locked-down environment for vulnerable-code experiments, or stop injecting vulnerabilities into anything
