@@ -45,9 +45,13 @@ jobs:
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        # This repo's Actions logs are public. The role ARN is a secret so it
+        # shows as ***, and mask-aws-account-id hides the AWS account ID in
+        # every later log line (ECR registry, image tag, task definition).
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -108,8 +112,9 @@ jobs:
       - name: Configure AWS credentials (scan role) via OIDC
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ZAP_SCAN_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ZAP_SCAN_ROLE_ARN }} # secret: hides the account ID in public logs
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
 
       - name: Let this runner through the ALB allow-list
         id: open
