@@ -106,6 +106,34 @@ Accounts you need:
   **from your machine** — this is separate from, and unrelated to, the credentials GitHub Actions
   will use later.
 
+### Keep your email address out of public commits
+
+Do this **before your first commit**. Every commit records an author email, and in a public repo
+anyone can read it (add `.patch` to any commit URL). Bots collect these addresses for spam and
+phishing. Once an email is in a pushed commit, removing it means rewriting history and asking
+GitHub Support to purge cached copies, so it's far easier to prevent.
+
+1. **GitHub website** → your profile picture → **Settings → Emails**:
+   - Turn on **Keep my email addresses private**. Commits you make on the website (including
+     "Squash and merge") then use your no-reply address instead of your real one.
+   - Turn on **Block command line pushes that expose my email**. A push that contains your real
+     address is then rejected.
+   - Note the no-reply address shown there: `<id>+<username>@users.noreply.github.com`.
+2. **VS Code terminal**: make Git on your machine use that address. Without this, Git may invent
+   one from your computer's name (for example `you@Your-MacBook-Air.local`), which is also public.
+
+   ```bash
+   git config --global user.name "<your GitHub username>"
+   git config --global user.email "<id>+<username>@users.noreply.github.com"
+   git config --global user.email   # check: should print the no-reply address
+   ```
+
+   You can look up the address with `gh api user --jq '"\(.id)+\(.login)@users.noreply.github.com"'`.
+
+> Lesson learned: this project skipped this step at first. The real email and a
+> computer-name address ended up in the commit history, and were left there rather than
+> rewriting `main` (see findings log #17).
+
 You should already have this project folder (`rails-ecs-demo/`) that Claude created for you,
 containing the app, `Dockerfile`, `infra/`, and `.github/workflows/`.
 
