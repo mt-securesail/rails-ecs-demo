@@ -20,7 +20,7 @@ class ActionsLogPrivacyTest < ActiveSupport::TestCase
   end
 
   test "workflows have AWS sign-in steps to check" do
-    assert_operator aws_sign_in_steps.size, :>=, 2, "expected the deploy and ZAP scan sign-in steps in cd.yml"
+    assert_operator aws_sign_in_steps.size, :>=, 3, "expected the deploy and ZAP scan sign-in steps in cd.yml and the AI review one in ai-review.yml"
   end
 
   test "every AWS sign-in step masks the account ID" do

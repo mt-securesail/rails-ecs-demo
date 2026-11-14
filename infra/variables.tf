@@ -47,3 +47,15 @@ variable "secret_key_base" {
   type        = string
   sensitive   = true
 }
+
+variable "budget_alert_email" {
+  description = "Where AWS Budgets sends Bedrock spending alerts (infra/ai_review.tf). Set it in terraform.tfvars (gitignored), never in a committed file: this repo is public."
+  type        = string
+  sensitive   = true # keeps it out of plan and apply output
+}
+
+variable "bedrock_monthly_budget_usd" {
+  description = "Monthly Amazon Bedrock budget in USD for the spending alerts."
+  type        = string
+  default     = "5"
+}

@@ -12,3 +12,6 @@ allowed_cidrs = ["203.0.113.7/32"]
 
 # Do NOT put secret_key_base here. Pass it at apply time instead:
 #   terraform apply -var="secret_key_base=$(openssl rand -hex 64)"
+
+# Where AWS Budgets emails Bedrock spending alerts (section 14).
+budget_alert_email = "you@example.com"
