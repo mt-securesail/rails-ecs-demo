@@ -1,4 +1,6 @@
 <h1>Rails on ECS Fargate</h1>
+<%# DELIBERATELY VULNERABLE (section 13, vuln catalog): reflected XSS, CWE-79. Never merge. %>
+<% if params[:name] %><p>Hello, <%= params[:name].html_safe %>!</p><% end %>
 <p>This page is being served from an AWS Fargate task behind an Application Load Balancer.</p>
 <ul>
   <li>Environment: <strong><%= Rails.env %></strong></li>
