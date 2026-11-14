@@ -31,3 +31,25 @@ accepted:
     decided_by: repo owner (mt-securesail)
     findings_log: 21
     expires: "2027-05-14"
+
+  - id: http-only-alb
+    title: Load balancer serves plain HTTP, not HTTPS (no TLS)
+    where: infra/alb.tf, aws_lb_listener.http; config/environments/production.rb (assume_ssl and force_ssl false)
+    reason: >-
+      HTTPS needs a domain and certificate, planned in section 16. Until then
+      traffic is limited to allowed_cidrs. Same decision as Trivy AWS-0054.
+    decided_by: repo owner (mt-securesail)
+    findings_log: 22
+    expires: "2027-05-14"
+
+  - id: open-egress-https
+    title: App tasks can make outbound HTTPS (TCP 443) to any address (0.0.0.0/0)
+    where: infra/networking.tf, aws_security_group.service egress
+    reason: >-
+      The task needs outbound HTTPS to pull its image (ECR), send logs
+      (CloudWatch) and read SECRET_KEY_BASE (SSM). Removing it needs VPC
+      endpoints (about $7+/month each), declined for cost. Same decision and
+      expiry as Trivy AWS-0104.
+    decided_by: repo owner (mt-securesail)
+    findings_log: 20
+    expires: "2027-01-31"
