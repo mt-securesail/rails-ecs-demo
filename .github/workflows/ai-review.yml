@@ -1,0 +1,86 @@
+name: AI security review (advisory)
+
+# Runs only when someone adds the "ai-review" label to a pull request (adding a
+# label needs write access to the repo). To run it again, remove the label and
+# add it back. Advisory only: it is not a required check and never blocks a merge.
+# See guide section 14 and infra/ai_review.tf.
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+# One review per PR at a time.
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ai-review:
+    # Only for the label, and only for branches in this repo (forks don't get
+    # AWS credentials anyway).
+    if: >-
+      github.event.label.name == 'ai-review' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      id-token: write      # OIDC: temporary AWS credentials, no stored keys
+      contents: read
+      pull-requests: write # post the results as a PR comment
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS credentials (AI review role) via OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_AI_REVIEW_ROLE_ARN }} # secret: hides the account ID in public logs
+          aws-region: us-east-1
+          mask-aws-account-id: true
+
+      - name: List the files this PR changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --name-only > changed-files.txt
+
+      # Read from the base branch (main), not this PR, so a PR can't add an
+      # exception for its own code. Ruby converts the YAML (Python's standard
+      # library has no YAML parser).
+      - name: Load accepted risks from the base branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git show "$BASE_SHA:.github/ai-review/accepted-risks.yml" > "$RUNNER_TEMP/accepted-risks.yml" 2>/dev/null; then
+            ruby -ryaml -rjson -e 'puts JSON.generate(YAML.safe_load_file(ARGV[0]))' "$RUNNER_TEMP/accepted-risks.yml" > accepted-risks.json
+          else
+            echo "No accepted-risks file on the base branch yet"
+            echo '{"accepted": []}' > accepted-risks.json
+          fi
+
+      # The script gives the models text only (no tools), and escapes their
+      # replies before they're shown. See .github/scripts/ai_review.py.
+      - name: Ask the models
+        run: python3 .github/scripts/ai_review.py changed-files.txt accepted-risks.json
+
+      - name: Add results to the job summary
+        if: always() && hashFiles('ai-review-out/report.md') != ''
+        run: cat ai-review-out/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post results as a PR comment
+        if: always() && hashFiles('ai-review-out/report.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file ai-review-out/report.md
+
+      - name: Upload full replies
+        if: always() && hashFiles('ai-review-out/report.json') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ai-review-report
+          path: ai-review-out/

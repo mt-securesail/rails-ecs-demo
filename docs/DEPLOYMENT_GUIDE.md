@@ -28,7 +28,7 @@ Do the steps in order — later steps assume earlier ones are done.
 12. The feedback loop: every finding becomes a regression test or rule that gates future deploys
 13. Inject vulnerabilities on purpose and record which tool catches which class
 13a. A finding no scanner caught: handle an outside (unsolicited) vulnerability report and feed it back into the loop
-14. Add an open-weight model as an extra reviewer (static code + running app)
+14. Add open-weight models on Amazon Bedrock as extra reviewers (code review on labeled PRs, then the running app)
 14a. Try AWS Continuum code review (AWS Security Agent) on pull requests
 14b. Try AWS Security Agent penetration testing against the running app
 15. Measure results and iterate
@@ -491,26 +491,68 @@ now listed in section 16.
 
 **Before real users:** give reporters a private channel (section 21).
 
-## 14. Open-weight model as an extra reviewer
+## 14. Open-weight models on Amazon Bedrock as extra reviewers
 
-Goal: a model you run yourself reviews (a) the source and (b) the running app, and its findings
-feed the same loop as section 12.
+Goal: open-weight models review (a) the source in a pull request and (b) the running app, and their findings feed the
+same loop as section 12. They run on **Amazon Bedrock** in `us-east-1`, called from GitHub Actions. Nothing runs on your Mac.
 
-- **Run it locally** (e.g. Ollama or llama.cpp on your Mac) so the code never goes to a third party.
-  A MacBook Air limits you to smaller code-capable models (roughly 7B-14B parameters); check which
-  current open-weight coder models fit your RAM.
-- **Static review**: a script (`scripts/llm_review.py`) walks `app/`, `config/`, `Dockerfile`, `infra/`,
-  `.github/workflows/`, sends each file with a fixed review prompt, and writes structured output
-  (file, line, class of issue, rationale) as JSON, optionally converted to SARIF to upload to code scanning.
-- **Running-app review**: give the model the ZAP report and raw HTTP responses (headers, error pages)
-  from the deployed app, and ask it to identify weaknesses and suggest requests to probe them.
-  Only probe your own ALB, locked to your IP.
-- **Treat output as advisory**: expect false positives and misses. Never auto-merge or auto-gate on model
-  output; a human triages, and confirmed findings go through the section 12 loop to become deterministic tests.
-- **Prompt-injection caution**: code under review can contain text aimed at the model ("ignore previous
-  instructions"). Run the reviewer with no tools, no network, and no write access.
-- **Score it** against the section 13 catalog: what it caught that scanners missed, what it missed,
-  and its false-positive rate.
+**Model choice.** Use only non-PRC-origin models. This guide uses **gpt-oss-120b** (OpenAI) and **Mistral Large 3**
+(Mistral AI). Other non-PRC options on Bedrock include gpt-oss-20b, Ministral, Magistral and Devstral 2 (Mistral AI).
+Bedrock doesn't use your prompts to train models or share them with the model providers.
+
+**How it fits together.**
+
+| Piece | Where | What it does |
+|---|---|---|
+| `infra/ai_review.tf` | AWS (you run `terraform apply` once) | IAM role `rails-ecs-demo-github-ai-review-role`. It trusts **pull-request** runs in this repo and can call only `bedrock:InvokeModel` on the two models. Also an AWS Budgets email alert on Bedrock spending ($5/month by default). |
+| `.github/workflows/ai-review.yml` | GitHub Actions | Runs when a PR gets the `ai-review` label. Gets temporary AWS credentials with OIDC, runs the script, posts a PR comment and job summary, uploads the full replies. |
+| `.github/scripts/ai_review.py` | GitHub runner | Sends `app/`, `config/`, `lib/`, `infra/`, the workflows and the `Dockerfile` (about 14k tokens) to each model with a fixed prompt. Reports findings, token counts and calculated cost. Leaves out `test/` and `docs/`, which describe the planted bugs. |
+| `test/security/github_oidc_trust_test.rb` | CI | Allows PR trust in `infra/ai_review.tf` only, and fails if that file grants anything but `bedrock:InvokeModel` on named models. |
+
+**Why a separate role that trusts PRs.** The deploy and ZAP roles trust only `main`. The review has to happen before merge, so
+this role trusts PR runs. That is acceptable only because the role can do nothing but call two models: no deploys, no secrets,
+no other AWS resources. The worst case is Bedrock charges, which the budget alert reports. GitHub doesn't give OIDC tokens to
+pull requests from forks.
+
+**Setup.**
+1. **VS Code terminal:** add `budget_alert_email = "..."` to `infra/terraform.tfvars` (gitignored; never in a committed file).
+   Then run `terraform plan` and `terraform apply` in `infra/`. Expect 3 to add: the role, its policy, and the budget.
+2. **AWS Management Console** (optional): Billing and Cost Management, Budgets, to see `rails-ecs-demo-bedrock-monthly`.
+3. **GitHub website:** repo Settings, Secrets and variables, Actions, new repository secret `AWS_AI_REVIEW_ROLE_ARN` with the
+   `github_ai_review_role_arn` output. It's a secret so the account ID stays out of the public logs.
+4. **GitHub website:** create the label `ai-review` (Issues or Pull requests, Labels).
+
+**Running it.** On the **GitHub website**, add the `ai-review` label to a PR. To run again, remove the label and add it back.
+Each run costs about $0.01-0.02 for both models together (prices checked 2026-11-14: gpt-oss-120b $0.15 in / $0.60 out,
+Mistral Large 3 $0.50 in / $1.50 out, per 1M tokens). Compare the calculated cost with AWS Cost Explorer the next day.
+
+**Accepted risks (suppressing known false positives).** Code comments don't work as suppressions here: the models are
+told to distrust text in the code, so a malicious PR can't talk them out of a finding. Instead, accepted risks live in
+`.github/ai-review/accepted-risks.yml` (id, reason, who decided, findings-log row, expiry within a year). The workflow
+reads that file **from the base branch**, so a PR can't add an exception for its own code. Models tag matching
+findings with the entry's id, and the PR comment moves them into a collapsed "Accepted risks" section: still visible,
+not in the main table. Matching is the model's judgment, so check that section too. Expired entries go back to being
+normal findings, and `test/security/ai_review_accepted_risks_test.rb` fails until someone reviews them. Log each entry in
+`docs/findings-log.md` (the first one, `public-alb`, is row 21).
+
+**Advisory, not a gate.** Model output is non-deterministic, has false positives, and misses things. It isn't a required check
+and must never auto-merge or block. A human triages each finding; confirmed ones go through the section 12 loop and become
+deterministic tests. If one model proves consistently useful, reconsider later.
+
+**Prompt-injection caution.** Code under review can contain text aimed at the model ("ignore previous instructions").
+The models get text only (no tools, no network, no write access), the prompt marks the code as untrusted data, and the
+script escapes the replies before posting them (no links, images or HTML).
+
+**First trial (one PR, both models).** Open a draft PR that plants the section 13 bugs (XSS, path traversal, command
+injection) and the section 13a `/diagnostics` endpoint, with no hints in code comments (say it's deliberately vulnerable
+in the PR description instead). Never merge it. Run the review once and record in `docs/vuln-catalog.md` what each model caught, what it
+missed, its false positives, and the cost.
+
+**Running-app review (later).** Two levels, both pointed only at your own ALB, from your allow-listed IP:
+- **AI-assisted triage:** give a model the ZAP report and raw HTTP responses (headers, error pages) and ask what to probe.
+  You make the requests.
+- **Small agentic DAST run:** let an agent make the requests itself against today's app, with a short request budget. This is a
+  practice run before AWS Security Agent (section 14b) and the open-source agents (section 20a).
 
 ## 14a. AWS Continuum code review (AWS Security Agent)
 
@@ -678,8 +720,9 @@ Check upstream first for newer versions, and read each tool's README for its cur
   they output as untrusted code.
 - **ARTEX self-update.** The mirror's latest commit changed self-update to download releases from `Hinln/ARTEX`, which you
   can't verify. Turn self-update off, or check out the commit before that change.
-- **Model access.** Use a new API key used only for this, with a spending limit, or a local model (section 14). Never reuse
-  a key from anything else.
+- **Model access.** Use non-PRC-origin models on Amazon Bedrock (section 14), through a separate IAM role with access to
+  the approved models only and a budget alert. Never reuse credentials from anything else. Check each tool's
+  configuration for a default model or provider before the first run, and change it if it's a PRC-origin model.
 - **Scope.** Give each tool only your own app's URL. Run from the IP in `allowed_cidrs` (section 10) so the IP lock stays on.
   Check AWS's penetration-testing policy for the services involved. Don't enable denial-of-service, brute-force-at-volume, or
   "exploit anything reachable" modes.
