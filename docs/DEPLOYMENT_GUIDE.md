@@ -202,22 +202,29 @@ now, you'll get an error — no real image has been deployed yet. That's expecte
 
 ## 4. Wire GitHub Actions to AWS
 
-In your repo on GitHub: **Settings → Secrets and variables → Actions → Variables tab** (use
-*Variables*, not *Secrets* — none of these values are sensitive; the whole point of OIDC is that
-there's no key to protect). Add:
+In your repo on GitHub: **Settings → Secrets and variables → Actions**. Add these on the
+**Variables** tab:
 
 | Variable | Value |
 |---|---|
 | `AWS_REGION` | `us-east-1` (or whatever you set) |
-| `AWS_DEPLOY_ROLE_ARN` | the `github_deploy_role_arn` output |
 | `ECR_REPOSITORY` | the repo name portion of `ecr_repository_url` (e.g. `rails-ecs-demo`) |
 | `ECS_CLUSTER` | the `ecs_cluster_name` output |
 | `ECS_SERVICE` | the `ecs_service_name` output |
 | `ECS_TASK_DEFINITION_FAMILY` | the `ecs_task_family` output |
 | `CONTAINER_NAME` | `app` |
 
-Nothing goes in the *Secrets* tab for this pipeline — that's a deliberate design choice worth
-noticing: OIDC removed the need for a long-lived AWS key sitting in GitHub.
+And this one on the **Secrets** tab:
+
+| Secret | Value |
+|---|---|
+| `AWS_DEPLOY_ROLE_ARN` | the `github_deploy_role_arn` output |
+
+The role ARN isn't a credential (OIDC means there's no AWS key stored in GitHub at all), but it
+contains your **AWS account ID**, and Actions logs of a public repo are public. GitHub hides
+secrets in logs (`***`), and the workflow's `mask-aws-account-id: true` hides the account ID in
+every later log line (ECR registry, image tags). The role ARN for the production ZAP scan
+(`AWS_ZAP_SCAN_ROLE_ARN`, section 11) is a secret for the same reason.
 
 ---
 

@@ -52,7 +52,7 @@ resource "aws_security_group" "service" {
   # (CloudWatch), and read SECRET_KEY_BASE (SSM); later, for outside APIs.
   # Exception: Trivy flags any 0.0.0.0/0 egress (AWS-0104). Removing it needs
   # VPC endpoints (~$7+/month each), declined for now to avoid cost.
-  # Decided by Matt, 2026-11-10. Review by 2027-01-31.
+  # Decided by the repo owner (mt-securesail), 2026-11-10. Review by 2027-01-31.
   #trivy:ignore:AWS-0104:exp:2027-01-31
   egress {
     description = "Outbound HTTPS"

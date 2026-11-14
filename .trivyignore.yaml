@@ -16,7 +16,7 @@
 # Example:
 # vulnerabilities:
 #   - id: CVE-2026-12345
-#     statement: "No fixed package in Debian yet; app doesn't use the affected feature. Decided by Matt."
+#     statement: "No fixed package in Debian yet; app doesn't use the affected feature. Decided by the repo owner (mt-securesail)."
 #     expired_at: 2026-12-31
 
 vulnerabilities: []

@@ -10,7 +10,7 @@
 # Example:
 # ignore:
 #   # No fixed package in Debian yet; app doesn't use the affected feature.
-#   # Decided by Matt. Expires 2026-12-31.
+#   # Decided by the repo owner (mt-securesail). Expires 2026-12-31.
 #   - vulnerability: CVE-2026-12345
 
 ignore: []
