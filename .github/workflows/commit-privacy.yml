@@ -1,0 +1,28 @@
+name: Commit Privacy
+
+# Fails a PR if any of its commits has an author, committer or Co-authored-by
+# email that isn't a no-reply address (finding #17). GitHub's "Block command
+# line pushes that expose my email" only covers the repo owner's own pushes;
+# this also catches co-author lines and commits made by other tools or people.
+# The squash-merge commit is made on the GitHub website after this runs; the
+# owner's "Keep my email addresses private" setting covers that one.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  commit-emails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history, to list the PR's commits
+          persist-credentials: false
+
+      - name: Check commit emails
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/scripts/check-commit-emails.sh "$BASE_SHA" "$HEAD_SHA"
