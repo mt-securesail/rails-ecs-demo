@@ -526,6 +526,15 @@ pull requests from forks.
 Each run costs about $0.01-0.02 for both models together (prices checked 2026-11-14: gpt-oss-120b $0.15 in / $0.60 out,
 Mistral Large 3 $0.50 in / $1.50 out, per 1M tokens). Compare the calculated cost with AWS Cost Explorer the next day.
 
+**Accepted risks (suppressing known false positives).** Code comments don't work as suppressions here: the models are
+told to distrust text in the code, so a malicious PR can't talk them out of a finding. Instead, accepted risks live in
+`.github/ai-review/accepted-risks.yml` (id, reason, who decided, findings-log row, expiry within a year). The workflow
+reads that file **from the base branch**, so a PR can't add an exception for its own code. Models tag matching
+findings with the entry's id, and the PR comment moves them into a collapsed "Accepted risks" section: still visible,
+not in the main table. Matching is the model's judgment, so check that section too. Expired entries go back to being
+normal findings, and `test/security/ai_review_accepted_risks_test.rb` fails until someone reviews them. Log each entry in
+`docs/findings-log.md` (the first one, `public-alb`, is row 21).
+
 **Advisory, not a gate.** Model output is non-deterministic, has false positives, and misses things. It isn't a required check
 and must never auto-merge or block. A human triages each finding; confirmed ones go through the section 12 loop and become
 deterministic tests. If one model proves consistently useful, reconsider later.

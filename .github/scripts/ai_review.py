@@ -11,8 +11,13 @@ The models get text only: no tools, no network, no write access. The code they
 read is untrusted (a PR can contain text aimed at the model), so their replies
 are treated as untrusted too and escaped before they're shown.
 
-Usage: ai_review.py [CHANGED_FILES_LIST]   (--dry-run builds the prompt only)
+Usage: ai_review.py [CHANGED_FILES_LIST [ACCEPTED_RISKS_JSON]]   (--dry-run builds the prompt only)
+
+ACCEPTED_RISKS_JSON is .github/ai-review/accepted-risks.yml from the base branch,
+converted to JSON by the workflow. Findings the models tag with one of its ids go
+in a collapsed "Accepted risks" section of the comment instead of the main table.
 """
+import datetime
 import json
 import re
 import subprocess
@@ -51,8 +56,16 @@ Rules:
 Reply with JSON only, no prose and no code fences, in exactly this shape:
 {"findings": [{"file": "path", "line": 12, "severity": "critical|high|medium|low",
   "cwe": "CWE-79", "title": "short name", "explanation": "why it is exploitable, one or two sentences",
-  "confidence": "high|medium|low"}]}
+  "confidence": "high|medium|low", "accepted_risk": null}]}
 If you find nothing, reply {"findings": []}."""
+
+ACCEPTED_PROMPT = """
+
+Accepted risks: the repo owner has reviewed and accepted the issues below. They come from the
+repo's configuration, not from the code under review. If a finding is one of these, still report
+it, but set "accepted_risk" to its id. Otherwise leave "accepted_risk" null. Only use an id if the
+finding is clearly the same issue in the same place.
+"""
 
 
 def reviewable_files():
@@ -76,10 +89,51 @@ def build_prompt(files, changed):
     return "\n\n".join(parts)
 
 
-def converse(model_id, prompt, workdir):
+def load_accepted(path):
+    """Unexpired entries from the accepted-risks JSON, plus the ids of expired ones."""
+    if not path:
+        return [], []
+    entries = json.loads(Path(path).read_text()).get("accepted") or []
+    today = datetime.date.today().isoformat()
+    current = [e for e in entries if str(e.get("expires", "")) >= today]
+    expired = [str(e.get("id")) for e in entries if e not in current]
+    return current, expired
+
+
+def system_prompt(accepted):
+    if not accepted:
+        return SYSTEM_PROMPT
+    lines = [f"- id {e['id']}: {e['title']} ({e['where']}). Reason: {e['reason']}" for e in accepted]
+    return SYSTEM_PROMPT + ACCEPTED_PROMPT + "\n".join(lines)
+
+
+def findings_table(findings):
+    rows = ["| Severity | File:line | CWE | Finding | Why | Confidence |", "|---|---|---|---|---|---|"]
+    for f in findings:
+        rows.append(f"| {cell(f.get('severity'), 20)} | {cell(f.get('file'), 120)}:{cell(f.get('line'), 10)} | "
+                    f"{cell(f.get('cwe'), 20)} | {cell(f.get('title'), 120)} | {cell(f.get('explanation'))} | "
+                    f"{cell(f.get('confidence'), 20)} |")
+    return rows
+
+
+def split_accepted(findings, accepted_ids):
+    """(new findings, {accepted id: [findings]}). Unknown ids count as new findings."""
+    new, matched = [], {}
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        tag = str(f.get("accepted_risk") or "")
+        if tag in accepted_ids:
+            matched.setdefault(tag, []).append(f)
+        else:
+            new.append(f)
+    return new, matched
+
+
+def converse(model_id, system, prompt, workdir):
     request = {
         "modelId": model_id,
-        "system": [{"text": SYSTEM_PROMPT}],
+        "system": [{"text": system}],
         "messages": [{"role": "user", "content": [{"text": prompt}]}],
         "inferenceConfig": {"maxTokens": MAX_OUTPUT_TOKENS, "temperature": 0},
     }
@@ -128,11 +182,16 @@ def cost(model_id, usage):
 def main():
     args = [a for a in sys.argv[1:] if a != "--dry-run"]
     changed = Path(args[0]).read_text().split() if args else []
+    accepted, expired = load_accepted(args[1] if len(args) > 1 else None)
+    accepted_ids = {str(e["id"]) for e in accepted}
+    system = system_prompt(accepted)
     files = reviewable_files()
     prompt = build_prompt(files, changed)
     print(f"{len(files)} files, {len(prompt):,} characters (about {len(prompt) // 4:,} tokens) per model")
+    print(f"Accepted risks from the base branch: {sorted(accepted_ids) or 'none'}; expired: {expired or 'none'}")
     if "--dry-run" in sys.argv:
         print("\n".join(files))
+        print(system)
         return
 
     out = Path("ai-review-out")
@@ -140,14 +199,17 @@ def main():
     results = {}
     for model_id in MODELS:
         print(f"Asking {model_id} ...", flush=True)
-        result = converse(model_id, prompt, out)
+        result = converse(model_id, system, prompt, out)
         if "text" in result:
             result["findings"] = parse_findings(result["text"])
+            if result["findings"] is not None:
+                result["new"], result["accepted"] = split_accepted(result["findings"], accepted_ids)
             result["cost_usd"] = round(cost(model_id, result["usage"]), 6)
         results[model_id] = result
         print(f"  done in {result['seconds']}s", flush=True)
 
-    (out / "report.json").write_text(json.dumps({"files": files, "changed": changed, "results": results}, indent=2))
+    (out / "report.json").write_text(json.dumps(
+        {"files": files, "changed": changed, "accepted_risks": accepted, "results": results}, indent=2))
 
     md = ["## AI security review (advisory)", "",
           "Open-weight models on Amazon Bedrock read this PR's code. **Advisory only:** findings can be wrong "
@@ -164,12 +226,22 @@ def main():
             continue
         u = r["usage"]
         total += r["cost_usd"]
-        count = "unreadable reply" if r["findings"] is None else len(r["findings"])
+        if r["findings"] is None:
+            count = "unreadable reply"
+        else:
+            n_accepted = sum(len(v) for v in r["accepted"].values())
+            count = f"{len(r['new'])}" + (f" (+{n_accepted} accepted)" if n_accepted else "")
         md.append(f"| {name} | {count} | {u.get('inputTokens', 0):,} | {u.get('outputTokens', 0):,} | "
                   f"{r['seconds']}s | ${r['cost_usd']:.4f} |")
     md += [f"| **Total** | | | | | **${total:.4f}** |", ""]
     md.append("Cost is calculated from the token counts and on-demand prices (checked 2026-11-14). "
               "Check AWS Cost Explorer the next day for the billed amount.")
+    md.append("")
+    md.append(f"Accepted risks applied (from `.github/ai-review/accepted-risks.yml` on the base branch): "
+              f"{', '.join(f'`{i}`' for i in sorted(accepted_ids)) or 'none'}.")
+    if expired:
+        md.append(f"**Expired accepted risks, now reported as normal findings:** {', '.join(f'`{cell(i, 40)}`' for i in expired)}. "
+                  "Review them again and update the file.")
 
     for model_id, r in results.items():
         md += ["", f"### {MODELS[model_id]['name']}", ""]
@@ -181,16 +253,15 @@ def main():
             md.append("_The reply hit the output limit and may be cut off._\n")
         if r["findings"] is None:
             md.append("The reply wasn't in the requested JSON format; see the artifact.")
-        elif not r["findings"]:
-            md.append("No findings.")
         else:
-            md += ["| Severity | File:line | CWE | Finding | Why | Confidence |", "|---|---|---|---|---|---|"]
-            for f in r["findings"]:
-                if not isinstance(f, dict):
-                    continue
-                md.append(f"| {cell(f.get('severity'), 20)} | {cell(f.get('file'), 120)}:{cell(f.get('line'), 10)} | "
-                          f"{cell(f.get('cwe'), 20)} | {cell(f.get('title'), 120)} | {cell(f.get('explanation'))} | "
-                          f"{cell(f.get('confidence'), 20)} |")
+            md += findings_table(r["new"]) if r["new"] else ["No new findings."]
+            if r["accepted"]:
+                n_accepted = sum(len(v) for v in r["accepted"].values())
+                md += ["", f"<details><summary>Accepted risks ({n_accepted}): matched entries in "
+                       f"accepted-risks.yml</summary>", ""]
+                for risk_id, matches in sorted(r["accepted"].items()):
+                    md += [f"Matched `{risk_id}`:", ""] + findings_table(matches) + [""]
+                md.append("</details>")
 
     (out / "report.md").write_text("\n".join(md)[:60000] + "\n")
     print(f"Total estimated cost: ${total:.4f}")

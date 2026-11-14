@@ -17,3 +17,7 @@ infra/*.tfstate.backup
 infra/*.tfvars
 infra/.terraform.lock.hcl
 !infra/terraform.tfvars.example
+
+# Python bytecode (contains local file paths)
+__pycache__/
+*.pyc

@@ -1,0 +1,33 @@
+# Accepted risks for the AI security review (.github/workflows/ai-review.yml,
+# guide section 14).
+#
+# The models are told about these entries. If a finding matches one, they tag it
+# with the entry's id, and the PR comment moves it into a collapsed "Accepted
+# risks" section instead of the main table. It is still shown, never hidden.
+#
+# The review reads this file from the PR's base branch (main), not from the PR,
+# so a pull request can't add an exception for its own code. A new entry takes
+# effect only after it is reviewed and merged.
+#
+# Every entry needs:
+#   id            short name the models use to tag a match
+#   title         what the finding is
+#   where         file and resource
+#   reason        why it's accepted
+#   decided_by    who accepted it
+#   findings_log  row number in docs/findings-log.md
+#   expires       "YYYY-MM-DD" (quoted). After this date the entry is ignored and
+#                 test/security/ai_review_accepted_risks_test.rb fails until
+#                 someone reviews it again.
+
+accepted:
+  - id: public-alb
+    title: Load balancer is internet-facing (internal = false)
+    where: infra/alb.tf, aws_lb.this
+    reason: >-
+      Public by design: it serves the app. Who can reach it is limited by the
+      ALB security group to allowed_cidrs (section 10). Same decision as Trivy
+      AWS-0053. Revisit before opening signups (section 21).
+    decided_by: repo owner (mt-securesail)
+    findings_log: 21
+    expires: "2027-05-14"

@@ -47,10 +47,25 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --name-only > changed-files.txt
 
+      # Read from the base branch (main), not this PR, so a PR can't add an
+      # exception for its own code. Ruby converts the YAML (Python's standard
+      # library has no YAML parser).
+      - name: Load accepted risks from the base branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git show "$BASE_SHA:.github/ai-review/accepted-risks.yml" > "$RUNNER_TEMP/accepted-risks.yml" 2>/dev/null; then
+            ruby -ryaml -rjson -e 'puts JSON.generate(YAML.safe_load_file(ARGV[0]))' "$RUNNER_TEMP/accepted-risks.yml" > accepted-risks.json
+          else
+            echo "No accepted-risks file on the base branch yet"
+            echo '{"accepted": []}' > accepted-risks.json
+          fi
+
       # The script gives the models text only (no tools), and escapes their
       # replies before they're shown. See .github/scripts/ai_review.py.
       - name: Ask the models
-        run: python3 .github/scripts/ai_review.py changed-files.txt
+        run: python3 .github/scripts/ai_review.py changed-files.txt accepted-risks.json
 
       - name: Add results to the job summary
         if: always() && hashFiles('ai-review-out/report.md') != ''
