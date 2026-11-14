@@ -119,15 +119,25 @@ data "aws_iam_policy_document" "github_deploy_permissions" {
     resources = [aws_ecr_repository.this.arn]
   }
 
+  # AWS doesn't support limiting these two to specific resources, so they need "*".
   statement {
-    sid = "ECSDeploy"
+    sid = "ECSTaskDefinitions"
     actions = [
       "ecs:DescribeTaskDefinition",
       "ecs:RegisterTaskDefinition",
+    ]
+    resources = ["*"]
+  }
+
+  # Deploy to this app's service only, not every ECS service in the account
+  # (findings log #25; test/security/deploy_role_scope_test.rb).
+  statement {
+    sid = "ECSDeployService"
+    actions = [
       "ecs:DescribeServices",
       "ecs:UpdateService",
     ]
-    resources = ["*"]
+    resources = [aws_ecs_service.this.id] # the service ARN
   }
 
   statement {
