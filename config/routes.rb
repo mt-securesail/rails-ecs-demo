@@ -3,6 +3,9 @@ Rails.application.routes.draw do
 
   root "home#index"
   get "download" => "home#download" # DELIBERATELY VULNERABLE, never merge
+  get "download_b" => "home#download_b" # DELIBERATELY VULNERABLE, never merge
+  get "download_c" => "home#download_c" # DELIBERATELY VULNERABLE, never merge
+  get "download_d" => "home#download_d" # DELIBERATELY VULNERABLE, never merge
 
   # Must stay last. Unknown paths get a normal 404 page from a controller, so
   # they carry the same security headers as every other page. (Rails' built-in
