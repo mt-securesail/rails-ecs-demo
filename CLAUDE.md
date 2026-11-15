@@ -27,5 +27,8 @@ practice secure-SDLC tooling (secret scanning, CodeQL, Brakeman, Dependabot, and
 - CI (`.github/workflows/ci.yml`) runs tests and Brakeman. CD (`.github/workflows/cd.yml`) deploys on push to `main`
   using GitHub OIDC (no stored AWS keys).
 - The GitHub OIDC trust policy uses the repo's immutable subject prefix (`github_oidc_sub_prefix` in `terraform.tfvars`).
-- The app can be switched off to save cost: `bin/app-power off|on|status` (guide section 34). The owner runs
-  `on`/`off` in the VS Code terminal (it runs `terraform apply`); Claude may run `status`, which is read-only.
+- The app can be switched off to save cost: `bin/app-power off|on|status` (guide section 34). When the owner
+  asks to turn the app off or on, Claude runs `bin/app-power off --yes` or `bin/app-power on --yes`. The request is
+  the "clear yes" for that apply, because the script refuses any plan that changes more than the 3 on/off
+  resources. If it stops on unexpected changes, show the owner the plan and wait. This exception covers only
+  `bin/app-power`, not other `terraform apply` runs.

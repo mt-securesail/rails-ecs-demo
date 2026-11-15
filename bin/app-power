@@ -4,10 +4,12 @@
 #   bin/app-power off     remove the load balancer and the Fargate task (~$50/month -> ~$0.30)
 #   bin/app-power on      bring them back, then point GitHub's APP_URL at the new load balancer
 #   bin/app-power status  show whether it's on (read-only)
+#   add --yes to on/off   skip the "type yes" prompt (only when the plan is exactly as expected)
 #
-# Run it yourself in a terminal: it runs terraform apply, after showing the plan
-# and asking you to type "yes". It refuses to apply if the plan would change
-# anything other than the three on/off resources.
+# It runs terraform apply, after showing the plan and asking you to type "yes".
+# It refuses to apply if the plan would change anything other than the three
+# on/off resources, with or without --yes. (--yes is for Claude Code: the
+# owner's "turn the app on/off" request is the yes for that exact plan.)
 #
 # Needs: terraform, aws (signed in), gh (signed in, with access to this repo's
 # variables), jq, curl. Off keeps ECR, logs, IAM roles, the secret parameter,
@@ -37,7 +39,7 @@ TFVARS="$INFRA/terraform.tfvars"
 die() { echo "app-power: $*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 }
 
@@ -126,8 +128,12 @@ switch() {
   else
     echo
     echo "This will $action: ${TOGGLED[*]}"
-    read -r -p "Type yes to apply: " answer
-    [ "$answer" = "yes" ] || die "not applied"
+    if [ "$ASSUME_YES" = "1" ]; then
+      echo "Applying (--yes): the plan is exactly the expected on/off change."
+    else
+      read -r -p "Type yes to apply: " answer
+      [ "$answer" = "yes" ] || die "not applied"
+    fi
     if [ "$want" = "false" ]; then
       # First, so a deploy that starts meanwhile doesn't try to update the service.
       (cd "$ROOT" && gh variable set APP_ENABLED --body false)
@@ -158,6 +164,13 @@ switch() {
   fi
   echo "Took $(( ($(date +%s) - start) / 60 )) min $(( ($(date +%s) - start) % 60 )) s."
 }
+
+ASSUME_YES=0
+if [ "${2:-}" = "--yes" ]; then
+  ASSUME_YES=1
+elif [ -n "${2:-}" ]; then
+  usage
+fi
 
 case "${1:-}" in
   on) switch true ;;

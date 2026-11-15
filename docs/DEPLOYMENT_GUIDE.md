@@ -1017,6 +1017,8 @@ bin/app-power status   # read-only
 
 - It runs `terraform plan`, **refuses** if the plan changes anything besides those three resources
   (for example drift, or an unrelated edit to `infra/`), and applies only after you type `yes`.
+  `--yes` skips only that prompt, never the check. Claude Code uses it when you ask it to turn the
+  app on or off (`CLAUDE.md`).
 - It saves `app_enabled` in `terraform.tfvars`, so a later plain `terraform apply` keeps the switch
   where it is.
 - **On** starts the latest registered task definition, so the app comes back with the last deployed

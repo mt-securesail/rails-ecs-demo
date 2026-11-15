@@ -35,6 +35,17 @@ class AppPowerTest < ActiveSupport::TestCase
     refute_match(/-auto-approve/, script)
   end
 
+  # --yes skips only the prompt. The unexpected-changes check must come first,
+  # so --yes can never apply a plan that does more than switch the app.
+  test "--yes can't skip the unexpected-changes check" do
+    script = File.read(SCRIPT)
+    guard = script.index('changes" != "$expected"')
+    skip = script.index('if [ "$ASSUME_YES" = "1" ]')
+
+    assert guard && skip, "expected both the plan check and the --yes branch"
+    assert_operator guard, :<, skip
+  end
+
   test "the deploy role can still name the service while it's switched off" do
     iam = File.read(Rails.root.join("infra/iam.tf"))
 
