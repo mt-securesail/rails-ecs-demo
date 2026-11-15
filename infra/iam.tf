@@ -137,7 +137,11 @@ data "aws_iam_policy_document" "github_deploy_permissions" {
       "ecs:DescribeServices",
       "ecs:UpdateService",
     ]
-    resources = [aws_ecs_service.this.id] # the service ARN
+    # The service ARN, built from its name so it stays the same while the
+    # app is switched off (the service doesn't exist then).
+    resources = [
+      "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${aws_ecs_cluster.this.name}/${local.ecs_service_name}"
+    ]
   }
 
   # Pass the app's two roles to ECS tasks only, not to any other AWS service
