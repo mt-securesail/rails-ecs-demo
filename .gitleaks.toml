@@ -1,0 +1,23 @@
+# Gitleaks configuration (.github/workflows/secret-scan.yml).
+# Uses all of Gitleaks' built-in rules, plus the custom rules below.
+#
+# To accept a false positive, add its fingerprint (printed in the job log) to
+# .gitleaksignore, with a comment saying why and who decided, and log it in
+# docs/findings-log.md. Never accept a real secret: rotate it instead.
+
+[extend]
+useDefault = true
+
+# The built-in rules don't flag a password inside a URL, such as
+# postgres://user:password@host/db or https://user:password@example.com.
+[[rules]]
+id = "url-embedded-credentials"
+description = "Password embedded in a URL (user:password@host)"
+regex = '''[a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@'"]+:([^\s/@'"]{6,})@[^\s/'"]+'''
+secretGroup = 1
+keywords = ["://"]
+
+  # Ignore obvious placeholders like user:password@ or ${DB_PASSWORD}.
+  [[rules.allowlists]]
+  regexTarget = "secret"
+  regexes = ['''^(password|passwd|changeme|example|secret|xxx+|\*+)$''', '''^\$\{?[A-Z_]+\}?$''', '''^<[^>]+>$''']

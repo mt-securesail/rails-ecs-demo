@@ -1,0 +1,9 @@
+# Accepted Gitleaks false positives, one fingerprint per line
+# (commit:file:rule:line, printed in the secret-scan job log).
+#
+# Add an entry only for a false positive, never for a real secret (rotate it
+# instead). Put a comment above each entry: why it's safe, who decided, and the
+# docs/findings-log.md row. The CI job reads this file from main, so a new entry
+# must be merged in its own PR before the PR it excuses can pass.
+#
+# No entries yet: the full history (78 commits) was clean on 2026-11-15.
