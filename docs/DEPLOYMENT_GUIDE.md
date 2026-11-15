@@ -400,6 +400,7 @@ Add these one at a time, each in its own PR, so you can see exactly what each ad
 | Container image | Trivy in CI, plus Amazon Inspector enhanced scanning on ECR | Actions / AWS |
 | Terraform (IaC) | Checkov or Trivy config scan | Actions |
 | Workflow files | CodeQL for GitHub Actions workflows, plus pinning actions to SHAs | GitHub |
+| Secrets (generic) | Gitleaks on every PR commit: private keys, passwords in URLs, other generic secrets. GitHub's own non-provider patterns and validity checks need an organization with Secret Protection, so they aren't available on a personal-account repo. Rules and ignore list are read from `main` | Actions |
 | Running app (DAST) | OWASP ZAP baseline scan against the ALB URL, run after deploy | Actions |
 | AWS runtime/posture | GuardDuty, Security Hub, IAM Access Analyzer (optional, small cost) | AWS |
 
