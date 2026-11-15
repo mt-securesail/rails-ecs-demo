@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Turn the production app on or off to save cost (DEPLOYMENT_GUIDE section 34).
+#
+#   bin/app-power off     remove the load balancer and the Fargate task (~$50/month -> ~$0.30)
+#   bin/app-power on      bring them back, then point GitHub's APP_URL at the new load balancer
+#   bin/app-power status  show whether it's on (read-only)
+#
+# Run it yourself in a terminal: it runs terraform apply, after showing the plan
+# and asking you to type "yes". It refuses to apply if the plan would change
+# anything other than the three on/off resources.
+#
+# Needs: terraform, aws (signed in), gh (signed in, with access to this repo's
+# variables), jq, curl. Off keeps ECR, logs, IAM roles, the secret parameter,
+# security groups and the target group: together they cost under $0.30/month,
+# and keeping them makes "on" take minutes, with no rebuild.
+set -euo pipefail
+
+PROJECT="rails-ecs-demo"
+REGION="us-east-1"
+SECRET_PARAM="/${PROJECT}/SECRET_KEY_BASE"
+CLUSTER="${PROJECT}-cluster"
+SERVICE="${PROJECT}-service"
+ALB_NAME="${PROJECT}-alb"
+
+# The only changes an on/off apply may make. Anything else in the plan (drift,
+# an unrelated edit) means: stop and run a normal terraform plan instead.
+TOGGLED=(
+  "aws_ecs_service.this[0]"
+  "aws_lb.this[0]"
+  "aws_lb_listener.http[0]"
+)
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+INFRA="$ROOT/infra"
+TFVARS="$INFRA/terraform.tfvars"
+
+die() { echo "app-power: $*" >&2; exit 1; }
+
+usage() {
+  sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+}
+
+need_tools() {
+  local tool
+  for tool in terraform aws gh jq curl; do
+    command -v "$tool" > /dev/null || die "$tool is not installed"
+  done
+  aws sts get-caller-identity > /dev/null 2>&1 || die "the AWS CLI isn't signed in (try: aws sso login, or check your profile)"
+  gh auth status > /dev/null 2>&1 || die "the GitHub CLI isn't signed in (run: gh auth login)"
+  [ -f "$TFVARS" ] || die "missing $TFVARS"
+}
+
+repo() { (cd "$ROOT" && gh repo view --json nameWithOwner -q .nameWithOwner); }
+
+status() {
+  local alb running enabled url
+  alb=$(aws elbv2 describe-load-balancers --region "$REGION" --names "$ALB_NAME" \
+    --query 'LoadBalancers[0].State.Code' --output text 2> /dev/null || echo "none")
+  running=$(aws ecs describe-services --region "$REGION" --cluster "$CLUSTER" --services "$SERVICE" \
+    --query "services[?status=='ACTIVE'] | [0].runningCount" --output text 2> /dev/null || echo "none")
+  [ "$running" = "None" ] && running="none"
+  enabled=$(cd "$ROOT" && gh variable get APP_ENABLED 2> /dev/null || echo "(unset = on)")
+  url=$(cd "$ROOT" && gh variable get APP_URL 2> /dev/null || echo "(unset)")
+  echo "Load balancer:         $alb"
+  echo "Running app tasks:     $running"
+  echo "GitHub APP_ENABLED:    $enabled"
+  echo "GitHub APP_URL:        $url"
+  if [ "$alb" = "active" ] && [ "$running" != "none" ] && [ "$running" -ge 1 ]; then
+    echo "=> The app is ON."
+  elif [ "$alb" = "none" ] && [ "$running" = "none" ]; then
+    echo "=> The app is OFF."
+  else
+    echo "=> In between (starting, stopping, or partly removed)."
+  fi
+}
+
+# Saves the switch position in terraform.tfvars (gitignored), so any later
+# plain `terraform apply` keeps it instead of flipping it back.
+save_setting() {
+  local want="$1" tmp
+  tmp=$(mktemp)
+  if grep -qE '^[[:space:]]*app_enabled[[:space:]]*=' "$TFVARS"; then
+    sed -E "s/^[[:space:]]*app_enabled[[:space:]]*=.*/app_enabled = $want/" "$TFVARS" > "$tmp"
+  else
+    cat "$TFVARS" > "$tmp"
+    printf '\n# On/off switch, set by bin/app-power\napp_enabled = %s\n' "$want" >> "$tmp"
+  fi
+  cat "$tmp" > "$TFVARS" # keeps the file's permissions
+  rm -f "$tmp"
+}
+
+switch() {
+  local want="$1" action expected changes repo_name start workdir url
+  [ "$want" = "true" ] && action="create" || action="delete"
+  start=$(date +%s)
+  need_tools
+  repo_name=$(repo)
+
+  workdir=$(mktemp -d)
+  # The plan file holds the secret: delete it and unset the secret on any exit.
+  trap 'rm -rf "$workdir"; unset TF_VAR_secret_key_base' EXIT
+
+  TF_VAR_secret_key_base=$(aws ssm get-parameter --region "$REGION" --name "$SECRET_PARAM" \
+    --with-decryption --query Parameter.Value --output text)
+  export TF_VAR_secret_key_base
+
+  cd "$INFRA"
+  terraform plan -input=false -var "app_enabled=$want" -out "$workdir/power.tfplan"
+
+  expected=$(printf "$action %s\n" "${TOGGLED[@]}" | sort)
+  changes=$(terraform show -json "$workdir/power.tfplan" | jq -r '
+    .resource_changes[]
+    | select(.change.actions != ["no-op"] and .change.actions != ["read"])
+    | "\(.change.actions | join("+")) \(.address)"' | sort)
+
+  if [ -z "$changes" ]; then
+    echo "Terraform has nothing to change: the app is already $([ "$want" = true ] && echo on || echo off)."
+  elif [ "$changes" != "$expected" ]; then
+    echo
+    echo "STOPPED: this plan changes more than the on/off resources. Nothing was applied."
+    echo "Planned:"; echo "$changes" | sed 's/^/  /'
+    echo "Expected only:"; echo "$expected" | sed 's/^/  /'
+    echo "Run a normal terraform plan to see why (for example a manual change in AWS)."
+    exit 1
+  else
+    echo
+    echo "This will $action: ${TOGGLED[*]}"
+    read -r -p "Type yes to apply: " answer
+    [ "$answer" = "yes" ] || die "not applied"
+    if [ "$want" = "false" ]; then
+      # First, so a deploy that starts meanwhile doesn't try to update the service.
+      (cd "$ROOT" && gh variable set APP_ENABLED --body false)
+    fi
+    terraform apply -input=false "$workdir/power.tfplan"
+  fi
+  save_setting "$want"
+
+  if [ "$want" = "true" ]; then
+    echo "Waiting for the app task to be healthy (usually 2-4 minutes)..."
+    aws ecs wait services-stable --region "$REGION" --cluster "$CLUSTER" --services "$SERVICE"
+    url="http://$(terraform output -raw alb_dns_name)"
+    (cd "$ROOT" && gh variable set APP_URL --body "$url" && gh variable set APP_ENABLED --body true)
+    echo "Updated GitHub variables APP_URL and APP_ENABLED in $repo_name."
+    echo "Checking $url/up (a new load balancer's address can take a few minutes to resolve)..."
+    for _ in $(seq 1 30); do
+      if curl -fsS -m 5 "$url/up" > /dev/null 2>&1; then
+        echo "The app is ON: $url"
+        break
+      fi
+      sleep 10
+    done || true
+    curl -fsS -m 5 "$url/up" > /dev/null 2>&1 \
+      || echo "Not reachable from here yet. If your IP changed, update allowed_cidrs. URL: $url"
+  else
+    (cd "$ROOT" && gh variable set APP_ENABLED --body false)
+    echo "The app is OFF. Merges to main still build and register the image; they run when you turn it on."
+  fi
+  echo "Took $(( ($(date +%s) - start) / 60 )) min $(( ($(date +%s) - start) % 60 )) s."
+}
+
+case "${1:-}" in
+  on) switch true ;;
+  off) switch false ;;
+  status) need_tools; status ;;
+  *) usage ;;
+esac

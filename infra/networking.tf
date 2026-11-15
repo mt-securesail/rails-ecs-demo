@@ -5,10 +5,19 @@ data "aws_vpc" "default" {
   default = true
 }
 
-data "aws_subnets" "default" {
+# Only the default subnets in var.app_availability_zones (2 by default, not all 6).
+data "aws_subnets" "app" {
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.default.id]
+  }
+  filter {
+    name   = "default-for-az"
+    values = ["true"]
+  }
+  filter {
+    name   = "availability-zone"
+    values = var.app_availability_zones
   }
 }
 

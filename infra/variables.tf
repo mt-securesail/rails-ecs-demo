@@ -59,3 +59,29 @@ variable "bedrock_monthly_budget_usd" {
   type        = string
   default     = "5"
 }
+
+# The on/off switch (bin/app-power). Off removes only what bills by the hour:
+# the load balancer, its listener, and the ECS service (the Fargate task).
+# Everything else stays so turning back on takes minutes, not a rebuild.
+# bin/app-power sets this in terraform.tfvars, so any later plain
+# `terraform apply` keeps the same state instead of flipping it back.
+variable "app_enabled" {
+  description = "true = the app is running (ALB + Fargate task). false = off, to save cost."
+  type        = bool
+  default     = true
+}
+
+# A load balancer needs at least 2 availability zones. The default VPC has 6,
+# and each zone the ALB is in costs a public IPv4 address ($3.65/month).
+# The Fargate task uses the same zones, because an ALB only sends traffic to
+# targets in its own zones.
+variable "app_availability_zones" {
+  description = "Availability zones (default-VPC subnets) for the ALB and the Fargate task."
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
+
+  validation {
+    condition     = length(var.app_availability_zones) >= 2
+    error_message = "An Application Load Balancer needs at least 2 availability zones."
+  }
+}

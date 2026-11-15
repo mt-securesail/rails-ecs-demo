@@ -1,5 +1,10 @@
+# null while the app is switched off.
 output "alb_dns_name" {
-  value = aws_lb.this.dns_name
+  value = one(aws_lb.this[*].dns_name)
+}
+
+output "app_url" {
+  value = var.app_enabled ? "http://${aws_lb.this[0].dns_name}" : null
 }
 
 output "ecr_repository_url" {
@@ -15,7 +20,7 @@ output "ecs_cluster_name" {
 }
 
 output "ecs_service_name" {
-  value = aws_ecs_service.this.name
+  value = local.ecs_service_name
 }
 
 output "ecs_task_family" {

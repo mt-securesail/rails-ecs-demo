@@ -27,3 +27,5 @@ practice secure-SDLC tooling (secret scanning, CodeQL, Brakeman, Dependabot, and
 - CI (`.github/workflows/ci.yml`) runs tests and Brakeman. CD (`.github/workflows/cd.yml`) deploys on push to `main`
   using GitHub OIDC (no stored AWS keys).
 - The GitHub OIDC trust policy uses the repo's immutable subject prefix (`github_oidc_sub_prefix` in `terraform.tfvars`).
+- The app can be switched off to save cost: `bin/app-power off|on|status` (guide section 34). The owner runs
+  `on`/`off` in the VS Code terminal (it runs `terraform apply`); Claude may run `status`, which is read-only.

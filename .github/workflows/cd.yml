@@ -82,13 +82,29 @@ jobs:
           container-name: ${{ env.CONTAINER_NAME }}
           image: ${{ steps.build-image.outputs.image }}
 
+      # APP_ENABLED is a repo variable that bin/app-power sets ("false" while
+      # the app is switched off; unset counts as on).
       - name: Deploy to ECS
+        if: vars.APP_ENABLED != 'false'
         uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b # v2.6.4
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+
+      # While the app is off there is no service to update. Registering the new
+      # task definition still matters: turning the app on starts the latest
+      # registered revision, so it comes back with this commit's code.
+      - name: Register only (the app is switched off)
+        if: vars.APP_ENABLED == 'false'
+        uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b # v2.6.4
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+
+      - name: Note that the app is off
+        if: vars.APP_ENABLED == 'false'
+        run: echo "::notice::The app is switched off (bin/app-power off). This commit's image is registered and will run when the app is turned on."
 
   # Scan what was just deployed with OWASP ZAP's baseline (passive) scan,
   # through the real ALB. The ALB only allows listed IPs, so this job briefly
@@ -97,6 +113,7 @@ jobs:
   # .zap/rules.tsv. (The PR version of this scan is .github/workflows/zap.yml.)
   zap-production:
     needs: deploy
+    if: vars.APP_ENABLED != 'false' # nothing to scan while the app is off
     runs-on: ubuntu-latest
     permissions:
       id-token: write

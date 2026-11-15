@@ -1,3 +1,11 @@
+locals {
+  # Fixed here so the deploy role's policy (infra/iam.tf) can name the service
+  # even while it's switched off.
+  ecs_service_name = "${var.project_name}-service"
+}
+
+data "aws_caller_identity" "current" {}
+
 resource "aws_ecs_cluster" "this" {
   name = "${var.project_name}-cluster"
 }
@@ -51,14 +59,20 @@ resource "aws_ecs_task_definition" "this" {
 }
 
 resource "aws_ecs_service" "this" {
-  name            = "${var.project_name}-service"
-  cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.this.arn
+  count = var.app_enabled ? 1 : 0 # the on/off switch (bin/app-power)
+
+  name    = local.ecs_service_name
+  cluster = aws_ecs_cluster.this.id
+  # The family name without a revision means "the latest active revision": the
+  # one the last CD run registered, with a real image. (Terraform's own
+  # revision has the placeholder image.) So turning the app back on runs the
+  # latest deployed code, with no rebuild.
+  task_definition = aws_ecs_task_definition.this.family
   desired_count   = 1
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = data.aws_subnets.default.ids
+    subnets          = data.aws_subnets.app.ids
     security_groups  = [aws_security_group.service.id]
     assign_public_ip = true
   }
@@ -74,4 +88,10 @@ resource "aws_ecs_service" "this" {
   lifecycle {
     ignore_changes = [task_definition, desired_count]
   }
+}
+
+# Keep the existing service when count was added (no rebuild).
+moved {
+  from = aws_ecs_service.this
+  to   = aws_ecs_service.this[0]
 }

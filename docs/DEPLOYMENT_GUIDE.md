@@ -989,9 +989,49 @@ Apple or Google API credentials, signing keys) into the app itself. Only publish
 
 ## 34. Cost control / tearing it down
 
-Running: an ALB (~$16-20/month) + a small Fargate task (roughly a few dollars/month at this size)
-+ negligible ECR/CloudWatch storage. Nothing here is free-tier-eligible long-term. When you're
-done experimenting:
+### What it costs (us-east-1 list prices, checked 2026-11-15)
+
+| Item | While on | While off |
+|---|---|---|
+| Public IPv4 addresses ($3.65/month each): 1 per load balancer zone + 1 for the task | ~$11 (2 zones + task) | $0 |
+| Application Load Balancer ($0.0225/hour, plus very little for traffic) | ~$17 | $0 |
+| Fargate task (0.25 vCPU, 0.5 GB, always on) | ~$9 | $0 |
+| ECR images (~2.8 GB, last 10 kept), CloudWatch logs (14 days) | ~$0.30 | ~$0.30 |
+| IAM roles, OIDC provider, SSM parameter (standard), security groups, target group, cluster, first 2 budgets | $0 | $0 |
+| Bedrock AI review (section 14) | ~$0.015 per labeled PR | same |
+| **Total** | **~$37/month** | **~$0.30/month** |
+
+The load balancer was first created in all 6 default-VPC zones (6 public IPs, ~$22/month). It's now
+in 2 (`app_availability_zones` in `infra/variables.tf`), the minimum for an ALB. The Fargate task
+uses the same 2 zones, because an ALB only routes to targets in its own zones.
+
+### The on/off switch
+
+`bin/app-power`, run in the **VS Code terminal** from the repo root:
+
+```bash
+bin/app-power off      # remove the load balancer, its listener and the ECS service
+bin/app-power on       # bring them back (~5 minutes) and update GitHub's APP_URL
+bin/app-power status   # read-only
+```
+
+- It runs `terraform plan`, **refuses** if the plan changes anything besides those three resources
+  (for example drift, or an unrelated edit to `infra/`), and applies only after you type `yes`.
+- It saves `app_enabled` in `terraform.tfvars`, so a later plain `terraform apply` keeps the switch
+  where it is.
+- **On** starts the latest registered task definition, so the app comes back with the last deployed
+  code, with no rebuild. A new load balancer gets a new address: the script waits for the app to be
+  healthy, then sets the `APP_URL` repo variable (used by the post-deploy ZAP scan) with `gh`.
+- **Off** sets the `APP_ENABLED` repo variable to `false`. While it's off, a merge to `main` still
+  runs CI, builds the image and registers it, but skips the service update and the ZAP scan. The
+  next **on** runs that commit.
+- Kept while off: ECR images, CloudWatch logs (also your audit trail), IAM roles, the secret
+  parameter (deleting it would also log everyone out on the next start), security groups and the
+  target group. Together under $0.30/month.
+
+### Tearing it all down
+
+When you're done experimenting for good:
 
 ```bash
 cd infra
